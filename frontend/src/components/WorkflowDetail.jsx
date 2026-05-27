@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { RefreshCw, Play, Pause } from "lucide-react";
 import { api } from "../api/client";
+import { isAdmin } from "../auth";
 import StatusBadge from "./StatusBadge";
 import { format } from "date-fns";
 
@@ -89,9 +90,11 @@ export default function WorkflowDetail() {
         </div>
         <div style={s.btnRow}>
           <button style={s.btn("default")} onClick={loadRuns}><RefreshCw size={14} /> Refresh</button>
-          <button style={s.btn(workflowState === "Disabled" ? "primary" : "danger")} onClick={toggleWorkflow} disabled={toggling}>
-            {workflowState === "Disabled" ? <><Play size={14} /> Enable</> : <><Pause size={14} /> Disable</>}
-          </button>
+          {isAdmin() && (
+            <button style={s.btn(workflowState === "Disabled" ? "primary" : "danger")} onClick={toggleWorkflow} disabled={toggling}>
+              {workflowState === "Disabled" ? <><Play size={14} /> Enable</> : <><Pause size={14} /> Disable</>}
+            </button>
+          )}
         </div>
       </div>
 
@@ -105,7 +108,7 @@ export default function WorkflowDetail() {
         ) : (
           <table style={s.table}>
             <thead>
-              <tr>{["Run ID", "Status", "Started", "Duration", "Trigger", ""].map(h => <th key={h} style={s.th}>{h}</th>)}</tr>
+              <tr>{["Run ID", "Status", "Started", "Duration", "Trigger", ...(isAdmin() ? [""] : [])].map(h => <th key={h} style={s.th}>{h}</th>)}</tr>
             </thead>
             <tbody>
               {runs.map(run => (
@@ -119,9 +122,11 @@ export default function WorkflowDetail() {
                   <td style={{ ...s.td, fontSize: 12 }}>{run.startTime ? format(new Date(run.startTime), "MMM d, HH:mm:ss") : "-"}</td>
                   <td style={{ ...s.td, fontSize: 12 }}>{duration(run.startTime, run.endTime)}</td>
                   <td style={{ ...s.td, fontSize: 12, color: C.textMute }}>{run.trigger || "-"}</td>
-                  <td style={s.td} onClick={e => e.stopPropagation()}>
-                    <ResubmitButton subId={subId} rg={rg} site={site} name={name} runName={run.name} onDone={showToast} />
-                  </td>
+                  {isAdmin() && (
+                    <td style={s.td} onClick={e => e.stopPropagation()}>
+                      <ResubmitButton subId={subId} rg={rg} site={site} name={name} runName={run.name} onDone={showToast} />
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

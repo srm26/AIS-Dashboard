@@ -55,6 +55,8 @@ const STATE_FILTERS = ["All", "Enabled", "Disabled"];
 export default function Dashboard() {
   const navigate = useNavigate();
   const [workflows, setWorkflows] = useState([]);
+  const [lastRuns, setLastRuns] = useState({});
+  const [lastRunsLoading, setLastRunsLoading] = useState(true);
   const [subscriptions, setSubscriptions] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -66,13 +68,19 @@ export default function Dashboard() {
   const [selectedSite, setSelectedSite] = useState("");
 
   const loadWorkflows = useCallback(async () => {
-    setLoading(true); setError(null);
+    setLoading(true); setLastRunsLoading(true); setError(null);
     try {
       const data = await api.getWorkflows();
       setWorkflows(data.workflows || []);
       if (data.errors?.length) setError(data.errors.map(e => `${e.site || e.subscriptionId}: ${e.error}`).join(" | "));
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
+    // Load last-run data in the background — table is already visible
+    try {
+      const runs = await api.getLastRuns();
+      setLastRuns(runs);
+    } catch {}
+    finally { setLastRunsLoading(false); }
   }, []);
 
   const loadSummary = useCallback(async () => {
@@ -113,7 +121,7 @@ export default function Dashboard() {
     return matchSearch && matchSub && matchSite && matchState;
   }), [workflows, search, selectedSub, selectedSite, stateFilter]);
 
-  const refresh = () => { loadWorkflows(); loadSummary(); };
+  const refresh = () => { loadWorkflows(); loadSummary(); setLastRuns({}); };
 
   return (
     <div>
@@ -172,28 +180,37 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(wf => (
-                <tr key={wf.id} style={s.tr}
-                  onClick={() => navigate(`/workflow/${wf.subscriptionId}/${wf.resourceGroup}/${wf.siteName}/${wf.name}`)}
-                  onMouseEnter={e => e.currentTarget.style.background = C.hover}
-                  onMouseLeave={e => e.currentTarget.style.background = ""}
-                >
-                  <td style={{ ...s.td, color: C.blue, fontWeight: 600 }}>{wf.name}</td>
-                  <td style={s.td}>{wf.siteName}</td>
-                  <td style={{ ...s.td, fontSize: 13 }}>{wf.subscriptionName || wf.subscriptionId.slice(0, 8) + "..."}</td>
-                  <td style={s.td}><StatusBadge status={wf.state} /></td>
-                  <td style={{ ...s.td, fontSize: 12, color: C.textMute }}>
-                    {wf.lastRunTime
-                      ? <span title={format(new Date(wf.lastRunTime), "PPpp")}>
-                          {formatDistanceToNow(new Date(wf.lastRunTime), { addSuffix: true })}
-                        </span>
-                      : <span style={{ color: "#444" }}>No runs</span>}
-                  </td>
-                  <td style={s.td}>
-                    {wf.lastRunStatus ? <StatusBadge status={wf.lastRunStatus} /> : "-"}
-                  </td>
-                </tr>
-              ))}
+              {filtered.map(wf => {
+                const lr = lastRuns[wf.id];
+                const lastRunTime = lr?.lastRunTime;
+                const lastRunStatus = lr?.lastRunStatus;
+                return (
+                  <tr key={wf.id} style={s.tr}
+                    onClick={() => navigate(`/workflow/${wf.subscriptionId}/${wf.resourceGroup}/${wf.siteName}/${wf.name}`)}
+                    onMouseEnter={e => e.currentTarget.style.background = C.hover}
+                    onMouseLeave={e => e.currentTarget.style.background = ""}
+                  >
+                    <td style={{ ...s.td, color: C.blue, fontWeight: 600 }}>{wf.name}</td>
+                    <td style={s.td}>{wf.siteName}</td>
+                    <td style={{ ...s.td, fontSize: 13 }}>{wf.subscriptionName || wf.subscriptionId.slice(0, 8) + "..."}</td>
+                    <td style={s.td}><StatusBadge status={wf.state} /></td>
+                    <td style={{ ...s.td, fontSize: 12, color: C.textMute }}>
+                      {lastRunsLoading && !lr
+                        ? <span style={{ color: "#444" }}>...</span>
+                        : lastRunTime
+                          ? <span title={format(new Date(lastRunTime), "PPpp")}>
+                              {formatDistanceToNow(new Date(lastRunTime), { addSuffix: true })}
+                            </span>
+                          : <span style={{ color: "#444" }}>No runs</span>}
+                    </td>
+                    <td style={s.td}>
+                      {lastRunsLoading && !lr
+                        ? <span style={{ color: "#444" }}>...</span>
+                        : lastRunStatus ? <StatusBadge status={lastRunStatus} /> : "-"}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}

@@ -8,9 +8,16 @@ class Settings(BaseSettings):
     azure_client_secret: str
     azure_subscription_ids: str  # comma-separated
     azure_resource_groups: str = ""  # comma-separated, empty = all
+    # Per-subscription SPN overrides (JSON). Falls back to global AZURE_* creds if absent.
+    # Format: [{"subscription_id":"...","tenant_id":"...","client_id":"...","client_secret":"..."}]
+    azure_spns: str = "[]"
     backend_host: str = "0.0.0.0"
     backend_port: int = 8000
     frontend_origin: str = "http://localhost:3000"
+    # Auth — comma-separated entries: username:password:role
+    # Roles: admin (can resubmit/enable/disable), viewer (read-only)
+    auth_secret_key: str = "change-me-to-a-random-secret"
+    auth_users: str = ""  # e.g. alice:pass1:admin,bob:pass2:viewer
 
     @property
     def subscription_ids(self) -> List[str]:

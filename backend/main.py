@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import os
 from config import settings
-from routers import workflows
+from routers import workflows, auth
 
 app = FastAPI(title="Azure Logic Apps Dashboard", version="1.0.0")
 
@@ -16,6 +16,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(workflows.router)
 
 # Serve built React frontend in production
