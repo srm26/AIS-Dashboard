@@ -45,13 +45,27 @@ async def _list_workflows_for_site(sub_id: str, rg: str, site_name: str) -> List
 
 
 def _workflow_state(wf: dict) -> str:
-    files = wf.get("properties", {}).get("files") or {}
+    props = wf.get("properties", {})
+
+    # 1. Check embedded workflow.json definition state
+    files = props.get("files") or {}
     wf_json = files.get("workflow.json") or {}
     state = wf_json.get("state", "")
     if state:
         return state.capitalize()
-    health = (wf.get("properties", {}).get("health") or {}).get("state", "")
-    return "Enabled" if health in ("", "Healthy") else health
+
+    # 2. Check top-level properties.state (set when workflow is disabled via API)
+    props_state = props.get("state", "")
+    if props_state:
+        return props_state.capitalize()
+
+    # 3. Fall back to health — only treat Healthy as Enabled; absent health ≠ Enabled
+    health = (props.get("health") or {}).get("state", "")
+    if health == "Healthy":
+        return "Enabled"
+    if health:
+        return health
+    return "Unknown"
 
 
 async def _get_last_run(sub_id: str, rg: str, site_name: str, wf_name: str,
