@@ -23,6 +23,11 @@ New-Item -ItemType Directory "$tmpDir\frontend" | Out-Null
 
 Copy-Item "$root\backend" "$tmpDir\backend" -Recurse
 Copy-Item "$root\frontend\dist" "$tmpDir\frontend\dist" -Recurse
+Copy-Item "$root\startup.sh" "$tmpDir\startup.sh"
+# Copy requirements.txt to root so Oryx detects this as a Python app and installs deps
+Copy-Item "$root\backend\requirements.txt" "$tmpDir\requirements.txt"
+# Pin Python version so Oryx builds with 3.12 (matching the runtime container)
+Copy-Item "$root\.python-version" "$tmpDir\.python-version"
 
 # Remove local venv from the package
 $venvPath = "$tmpDir\backend\.venv"
@@ -40,6 +45,6 @@ Write-Host "  1. Go to Azure Portal -> your App Service -> Deployment Center"
 Write-Host "  2. Choose 'Manual deploy' -> 'Deploy zip'"
 Write-Host "  3. Upload deploy.zip"
 Write-Host "  4. Set startup command to:"
-Write-Host "       cd /home/site/wwwroot/backend && uvicorn main:app --host 0.0.0.0 --port 8000" -ForegroundColor White
+Write-Host "       /home/site/wwwroot/startup.sh" -ForegroundColor White
 Write-Host "  5. Set environment variables under 'Environment variables':"
 Write-Host "       AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_SUBSCRIPTION_IDS"
