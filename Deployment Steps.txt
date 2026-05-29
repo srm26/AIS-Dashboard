@@ -1,0 +1,42 @@
+Deploying to a New Azure App Service
+1. Create the Web App in Azure Portal
+Create a resource → Web App
+Runtime stack: Python 3.12
+OS: Linux
+Region: your choice
+2. Configure Application Settings
+Azure Portal → your new App Service → Configuration → Application settings → add these:
+
+Name	Value
+SCM_DO_BUILD_DURING_DEPLOYMENT	true
+AZURE_TENANT_ID	your tenant ID
+AZURE_CLIENT_ID	your client ID
+AZURE_CLIENT_SECRET	your client secret
+AZURE_SUBSCRIPTION_IDS	comma-separated subscription IDs
+AUTH_USERS	e.g. alice:password:admin,bob:pass:viewer
+AUTH_SECRET_KEY	any long random string
+Click Save.
+
+3. Set the Startup Command
+Same Configuration page → General settings tab → Startup Command:
+
+
+/home/site/wwwroot/startup.sh
+Click Save.
+
+4. Build and Package Locally
+In VS Code terminal:
+
+
+.\deploy-azure.ps1
+This creates deploy.zip.
+
+5. Deploy the Zip
+Azure Portal → your App Service → Deployment Center → Manual deploy → upload deploy.zip.
+
+Or with Azure CLI:
+
+
+az webapp deploy --resource-group <rg> --name <app-name> --src-path deploy.zip --type zip
+6. Verify
+Watch Log Stream — you should see Oryx build with Python 3.12 and uvicorn start. Then open the app URL.
