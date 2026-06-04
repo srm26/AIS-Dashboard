@@ -1,4 +1,5 @@
 import asyncio
+import time
 import httpx
 from typing import Any, Dict, List, Optional
 from azure.identity import DefaultAzureCredential
@@ -21,6 +22,8 @@ class AzureClient:
             managed_identity_client_id=client_id or None,
             exclude_shared_token_cache_credential=True,
         )
+        self._token: Optional[str] = None
+        self._token_expiry: float = 0.0
         # Shared client — reuses TCP connections across concurrent requests
         self._http = httpx.AsyncClient(
             timeout=30,
@@ -28,11 +31,21 @@ class AzureClient:
         )
 
     def _get_token(self) -> str:
+        # Re-use cached token until 5 minutes before expiry
+        now = time.time()
+        if self._token and self._token_expiry - now > 300:
+            return self._token
         token = self._credential.get_token(SCOPE)
-        return token.token
+        self._token = token.token
+        self._token_expiry = token.expires_on
+        return self._token
 
-    def _headers(self) -> Dict[str, str]:
-        return {"Authorization": f"Bearer {self._get_token()}"}
+    async def _get_token_async(self) -> str:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._get_token)
+
+    async def _headers(self) -> Dict[str, str]:
+        return {"Authorization": f"Bearer {await self._get_token_async()}"}
 
     async def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
         """Execute an HTTP request with automatic retry on 429 (respects Retry-After)."""
@@ -54,14 +67,14 @@ class AzureClient:
         p = {"api-version": api_version}
         if params:
             p.update(params)
-        resp = await self._request("GET", url, headers=self._headers(), params=p)
+        resp = await self._request("GET", url, headers=await self._headers(), params=p)
         return resp.json()
 
     async def post(self, path: str, json: Optional[Dict] = None, api_version: str = WEB_API_VERSION) -> Any:
         url = f"{MGMT_BASE}{path}"
         resp = await self._request(
             "POST", url,
-            headers=self._headers(),
+            headers=await self._headers(),
             params={"api-version": api_version},
             json=json or {},
         )
@@ -73,7 +86,7 @@ class AzureClient:
         results.extend(data.get("value", []))
         next_link = data.get("nextLink")
         while next_link:
-            resp = await self._request("GET", next_link, headers=self._headers())
+            resp = await self._request("GET", next_link, headers=await self._headers())
             page = resp.json()
             results.extend(page.get("value", []))
             next_link = page.get("nextLink")
