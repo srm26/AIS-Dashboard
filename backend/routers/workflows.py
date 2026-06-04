@@ -97,8 +97,10 @@ async def list_subscriptions(_: dict = Depends(get_current_user)):
         try:
             data = await get_client(sub_id).get(f"/subscriptions/{sub_id}", api_version="2022-12-01")
             subs.append({"id": sub_id, "name": data.get("displayName", sub_id)})
-        except Exception:
-            subs.append({"id": sub_id, "name": sub_id})
+        except Exception as e:
+            # Surface permission errors so they're visible in the UI dropdown
+            msg = "⚠ Access denied" if "403" in str(e) else "⚠ Unavailable"
+            subs.append({"id": sub_id, "name": msg})
     return {"subscriptions": subs}
 
 
@@ -113,8 +115,8 @@ async def list_workflows(_: dict = Depends(get_current_user)):
         try:
             data = await get_client(sub_id).get(f"/subscriptions/{sub_id}", api_version="2022-12-01")
             sub_names[sub_id] = data.get("displayName", sub_id)
-        except Exception:
-            sub_names[sub_id] = sub_id
+        except Exception as e:
+            sub_names[sub_id] = "⚠ Access denied" if "403" in str(e) else sub_id
 
     await asyncio.gather(*[_fetch_sub_name(s) for s in settings.subscription_ids])
 

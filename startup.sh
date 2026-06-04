@@ -1,4 +1,4 @@
 #!/bin/bash
 set -e
-python3 -m pip install -r /home/site/wwwroot/backend/requirements.txt
+python3 -m pip install --user -r /home/site/wwwroot/backend/requirements.txt
 python3 /home/site/wwwroot/backend/main.py
