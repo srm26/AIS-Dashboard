@@ -1,4 +1,4 @@
-name: Deploy to Azure App Service
+name: Build
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
       - feature/managed-identity
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
 
     steps:
@@ -25,10 +25,3 @@ jobs:
           cd frontend
           npm ci
           npm run build
-
-      - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: ais-dashboard-wus2-dv-webapp
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          package: .
