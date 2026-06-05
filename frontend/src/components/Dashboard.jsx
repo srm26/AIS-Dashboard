@@ -52,20 +52,28 @@ const s = {
 
 const STATE_FILTERS = ["All", "Enabled", "Disabled"];
 
+// Persist subscriptions list across remounts so the dropdown is never empty on back-navigation
+let _subsCache = [];
+
+function getSavedFilters() {
+  try { return JSON.parse(sessionStorage.getItem("ais_filters") || "{}"); } catch { return {}; }
+}
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const [workflows, setWorkflows] = useState([]);
   const [lastRuns, setLastRuns] = useState({});
   const [lastRunsLoading, setLastRunsLoading] = useState(true);
-  const [subscriptions, setSubscriptions] = useState([]);
+  const [subscriptions, setSubscriptions] = useState(_subsCache);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
   const [stateFilter, setStateFilter] = useState("All");
-  const [selectedSub, setSelectedSub] = useState("");
-  const [selectedSite, setSelectedSite] = useState("");
+  const saved = getSavedFilters();
+  const [selectedSub, setSelectedSub] = useState(saved.sub || "");
+  const [selectedSite, setSelectedSite] = useState(saved.site || "");
 
   const loadWorkflows = useCallback(async () => {
     setLoading(true); setLastRunsLoading(true); setError(null);
@@ -90,8 +98,11 @@ export default function Dashboard() {
   }, []);
 
   const loadSubscriptions = useCallback(async () => {
-    try { setSubscriptions((await api.getSubscriptions()).subscriptions || []); }
-    catch {}
+    try {
+      const subs = (await api.getSubscriptions()).subscriptions || [];
+      _subsCache = subs;
+      setSubscriptions(subs);
+    } catch {}
   }, []);
 
   useEffect(() => {
@@ -99,6 +110,11 @@ export default function Dashboard() {
     loadSummary();
     loadSubscriptions();
   }, [loadWorkflows, loadSummary, loadSubscriptions]);
+
+  // Persist filter selections so they survive back-navigation
+  useEffect(() => {
+    sessionStorage.setItem("ais_filters", JSON.stringify({ sub: selectedSub, site: selectedSite }));
+  }, [selectedSub, selectedSite]);
 
   // Refresh summary counts whenever subscription or site filter changes
   useEffect(() => {
