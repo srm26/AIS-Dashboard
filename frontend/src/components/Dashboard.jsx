@@ -52,8 +52,9 @@ const s = {
 
 const STATE_FILTERS = ["All", "Enabled", "Disabled"];
 
-// Persist subscriptions list across remounts so the dropdown is never empty on back-navigation
+// Persist data across remounts so dropdowns and counts are never blank on back-navigation
 let _subsCache = [];
+let _wfCache = [];
 
 function getSavedFilters() {
   try { return JSON.parse(sessionStorage.getItem("ais_filters") || "{}"); } catch { return {}; }
@@ -61,12 +62,12 @@ function getSavedFilters() {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [workflows, setWorkflows] = useState([]);
+  const [workflows, setWorkflows] = useState(_wfCache);
   const [lastRuns, setLastRuns] = useState({});
   const [lastRunsLoading, setLastRunsLoading] = useState(true);
   const [subscriptions, setSubscriptions] = useState(_subsCache);
   const [summary, setSummary] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(_wfCache.length === 0);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
@@ -79,7 +80,9 @@ export default function Dashboard() {
     setLoading(true); setLastRunsLoading(true); setError(null);
     try {
       const data = await api.getWorkflows();
-      setWorkflows(data.workflows || []);
+      const wfs = data.workflows || [];
+      _wfCache = wfs;
+      setWorkflows(wfs);
       if (data.errors?.length) setError(data.errors.map(e => `${e.site || e.subscriptionId}: ${e.error}`).join(" | "));
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
