@@ -203,9 +203,18 @@ async def get_last_runs(_: dict = Depends(get_current_user)):
 
 
 @router.get("/summary")
-async def get_summary(_: dict = Depends(get_current_user)):
+async def get_summary(
+    subscription_id: Optional[str] = None,
+    site_name: Optional[str] = None,
+    _: dict = Depends(get_current_user),
+):
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     specs = await _get_all_workflow_specs()
+
+    if subscription_id:
+        specs = [s for s in specs if s["sub_id"] == subscription_id]
+    if site_name:
+        specs = [s for s in specs if s["site_name"] == site_name]
 
     total = len(specs)
     enabled = sum(1 for item in specs if _workflow_state(item["wf"]) != "Disabled")

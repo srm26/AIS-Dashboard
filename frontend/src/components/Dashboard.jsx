@@ -52,26 +52,37 @@ const s = {
 
 const STATE_FILTERS = ["All", "Enabled", "Disabled"];
 
+// Persist data across remounts so dropdowns and counts are never blank on back-navigation
+let _subsCache = [];
+let _wfCache = [];
+
+function getSavedFilters() {
+  try { return JSON.parse(sessionStorage.getItem("ais_filters") || "{}"); } catch { return {}; }
+}
+
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [workflows, setWorkflows] = useState([]);
+  const [workflows, setWorkflows] = useState(_wfCache);
   const [lastRuns, setLastRuns] = useState({});
   const [lastRunsLoading, setLastRunsLoading] = useState(true);
-  const [subscriptions, setSubscriptions] = useState([]);
+  const [subscriptions, setSubscriptions] = useState(_subsCache);
   const [summary, setSummary] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(_wfCache.length === 0);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
   const [stateFilter, setStateFilter] = useState("All");
-  const [selectedSub, setSelectedSub] = useState("");
-  const [selectedSite, setSelectedSite] = useState("");
+  const saved = getSavedFilters();
+  const [selectedSub, setSelectedSub] = useState(saved.sub || "");
+  const [selectedSite, setSelectedSite] = useState(saved.site || "");
 
   const loadWorkflows = useCallback(async () => {
     setLoading(true); setLastRunsLoading(true); setError(null);
     try {
       const data = await api.getWorkflows();
-      setWorkflows(data.workflows || []);
+      const wfs = data.workflows || [];
+      _wfCache = wfs;
+      setWorkflows(wfs);
       if (data.errors?.length) setError(data.errors.map(e => `${e.site || e.subscriptionId}: ${e.error}`).join(" | "));
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
@@ -83,15 +94,18 @@ export default function Dashboard() {
     finally { setLastRunsLoading(false); }
   }, []);
 
-  const loadSummary = useCallback(async () => {
+  const loadSummary = useCallback(async (subId = "", siteName = "") => {
     setSummaryLoading(true);
-    try { setSummary(await api.getSummary()); }
+    try { setSummary(await api.getSummary(subId, siteName)); }
     catch {} finally { setSummaryLoading(false); }
   }, []);
 
   const loadSubscriptions = useCallback(async () => {
-    try { setSubscriptions((await api.getSubscriptions()).subscriptions || []); }
-    catch {}
+    try {
+      const subs = (await api.getSubscriptions()).subscriptions || [];
+      _subsCache = subs;
+      setSubscriptions(subs);
+    } catch {}
   }, []);
 
   useEffect(() => {
@@ -99,6 +113,16 @@ export default function Dashboard() {
     loadSummary();
     loadSubscriptions();
   }, [loadWorkflows, loadSummary, loadSubscriptions]);
+
+  // Persist filter selections so they survive back-navigation
+  useEffect(() => {
+    sessionStorage.setItem("ais_filters", JSON.stringify({ sub: selectedSub, site: selectedSite }));
+  }, [selectedSub, selectedSite]);
+
+  // Refresh summary counts whenever subscription or site filter changes
+  useEffect(() => {
+    loadSummary(selectedSub, selectedSite);
+  }, [selectedSub, selectedSite, loadSummary]);
 
   // When subscription changes, reset site filter
   const handleSubChange = (val) => { setSelectedSub(val); setSelectedSite(""); };
@@ -109,27 +133,32 @@ export default function Dashboard() {
     return [...new Set(pool.map(w => w.siteName))].sort();
   }, [workflows, selectedSub]);
 
-  const filtered = useMemo(() => workflows.filter(wf => {
+  // Total and Enabled computed locally — no extra API call needed
+  const subSiteWorkflows = useMemo(() =>
+    workflows.filter(wf =>
+      (!selectedSub  || wf.subscriptionId === selectedSub) &&
+      (!selectedSite || wf.siteName === selectedSite)
+    ), [workflows, selectedSub, selectedSite]);
+
+  const filtered = useMemo(() => subSiteWorkflows.filter(wf => {
     const q = search.toLowerCase();
     const matchSearch = !q ||
       wf.name.toLowerCase().includes(q) ||
       wf.siteName.toLowerCase().includes(q) ||
       wf.resourceGroup.toLowerCase().includes(q);
-    const matchSub  = !selectedSub  || wf.subscriptionId === selectedSub;
-    const matchSite = !selectedSite || wf.siteName === selectedSite;
     const matchState = stateFilter === "All" || wf.state === stateFilter;
-    return matchSearch && matchSub && matchSite && matchState;
-  }), [workflows, search, selectedSub, selectedSite, stateFilter]);
+    return matchSearch && matchState;
+  }), [subSiteWorkflows, search, stateFilter]);
 
-  const refresh = () => { loadWorkflows(); loadSummary(); setLastRuns({}); };
+  const refresh = () => { loadWorkflows(); loadSummary(selectedSub, selectedSite); setLastRuns({}); };
 
   return (
     <div>
       <div style={s.grid}>
-        <SummaryCard label="Total Workflows"  value={summary?.total ?? "-"}       loading={summaryLoading} accent={C.blue} />
-        <SummaryCard label="Enabled"          value={summary?.enabled ?? "-"}     loading={summaryLoading} accent={C.green} />
-        <SummaryCard label="Runs Today"       value={summary?.runsToday ?? "-"}   loading={summaryLoading} accent={C.gold} />
-        <SummaryCard label="Failed Today"     value={summary?.failedToday ?? "-"} loading={summaryLoading} accent={C.orange} />
+        <SummaryCard label="Total Workflows"  value={subSiteWorkflows.length}                                          loading={loading} accent={C.blue} />
+        <SummaryCard label="Enabled"          value={subSiteWorkflows.filter(w => w.state !== "Disabled").length}    loading={loading} accent={C.green} />
+        <SummaryCard label="Runs Today"       value={summary?.runsToday ?? "-"}                                      loading={summaryLoading} accent={C.gold} />
+        <SummaryCard label="Failed Today"     value={summary?.failedToday ?? "-"}                                    loading={summaryLoading} accent={C.orange} />
       </div>
 
       {error && <div style={s.err}>{error}</div>}
