@@ -114,27 +114,32 @@ export default function Dashboard() {
     return [...new Set(pool.map(w => w.siteName))].sort();
   }, [workflows, selectedSub]);
 
-  const filtered = useMemo(() => workflows.filter(wf => {
+  // Total and Enabled computed locally — no extra API call needed
+  const subSiteWorkflows = useMemo(() =>
+    workflows.filter(wf =>
+      (!selectedSub  || wf.subscriptionId === selectedSub) &&
+      (!selectedSite || wf.siteName === selectedSite)
+    ), [workflows, selectedSub, selectedSite]);
+
+  const filtered = useMemo(() => subSiteWorkflows.filter(wf => {
     const q = search.toLowerCase();
     const matchSearch = !q ||
       wf.name.toLowerCase().includes(q) ||
       wf.siteName.toLowerCase().includes(q) ||
       wf.resourceGroup.toLowerCase().includes(q);
-    const matchSub  = !selectedSub  || wf.subscriptionId === selectedSub;
-    const matchSite = !selectedSite || wf.siteName === selectedSite;
     const matchState = stateFilter === "All" || wf.state === stateFilter;
-    return matchSearch && matchSub && matchSite && matchState;
-  }), [workflows, search, selectedSub, selectedSite, stateFilter]);
+    return matchSearch && matchState;
+  }), [subSiteWorkflows, search, stateFilter]);
 
   const refresh = () => { loadWorkflows(); loadSummary(selectedSub, selectedSite); setLastRuns({}); };
 
   return (
     <div>
       <div style={s.grid}>
-        <SummaryCard label="Total Workflows"  value={summary?.total ?? "-"}       loading={summaryLoading} accent={C.blue} />
-        <SummaryCard label="Enabled"          value={summary?.enabled ?? "-"}     loading={summaryLoading} accent={C.green} />
-        <SummaryCard label="Runs Today"       value={summary?.runsToday ?? "-"}   loading={summaryLoading} accent={C.gold} />
-        <SummaryCard label="Failed Today"     value={summary?.failedToday ?? "-"} loading={summaryLoading} accent={C.orange} />
+        <SummaryCard label="Total Workflows"  value={subSiteWorkflows.length}                                          loading={loading} accent={C.blue} />
+        <SummaryCard label="Enabled"          value={subSiteWorkflows.filter(w => w.state !== "Disabled").length}    loading={loading} accent={C.green} />
+        <SummaryCard label="Runs Today"       value={summary?.runsToday ?? "-"}                                      loading={summaryLoading} accent={C.gold} />
+        <SummaryCard label="Failed Today"     value={summary?.failedToday ?? "-"}                                    loading={summaryLoading} accent={C.orange} />
       </div>
 
       {error && <div style={s.err}>{error}</div>}
