@@ -83,9 +83,9 @@ export default function Dashboard() {
     finally { setLastRunsLoading(false); }
   }, []);
 
-  const loadSummary = useCallback(async () => {
+  const loadSummary = useCallback(async (subId = "", siteName = "") => {
     setSummaryLoading(true);
-    try { setSummary(await api.getSummary()); }
+    try { setSummary(await api.getSummary(subId, siteName)); }
     catch {} finally { setSummaryLoading(false); }
   }, []);
 
@@ -99,6 +99,11 @@ export default function Dashboard() {
     loadSummary();
     loadSubscriptions();
   }, [loadWorkflows, loadSummary, loadSubscriptions]);
+
+  // Refresh summary counts whenever subscription or site filter changes
+  useEffect(() => {
+    loadSummary(selectedSub, selectedSite);
+  }, [selectedSub, selectedSite, loadSummary]);
 
   // When subscription changes, reset site filter
   const handleSubChange = (val) => { setSelectedSub(val); setSelectedSite(""); };
@@ -121,7 +126,7 @@ export default function Dashboard() {
     return matchSearch && matchSub && matchSite && matchState;
   }), [workflows, search, selectedSub, selectedSite, stateFilter]);
 
-  const refresh = () => { loadWorkflows(); loadSummary(); setLastRuns({}); };
+  const refresh = () => { loadWorkflows(); loadSummary(selectedSub, selectedSite); setLastRuns({}); };
 
   return (
     <div>
