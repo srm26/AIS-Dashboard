@@ -3,14 +3,11 @@ from typing import List
 
 
 class Settings(BaseSettings):
-    azure_tenant_id: str
-    azure_client_id: str
-    azure_client_secret: str
     azure_subscription_ids: str  # comma-separated
     azure_resource_groups: str = ""  # comma-separated, empty = all
-    # Per-subscription SPN overrides (JSON). Falls back to global AZURE_* creds if absent.
-    # Format: [{"subscription_id":"...","tenant_id":"...","client_id":"...","client_secret":"..."}]
-    azure_spns: str = "[]"
+    # Optional: client ID of a user-assigned managed identity.
+    # Leave unset to use the system-assigned managed identity.
+    azure_managed_identity_client_id: str = ""
     backend_host: str = "0.0.0.0"
     backend_port: int = 8000
     frontend_origin: str = "http://localhost:3000"

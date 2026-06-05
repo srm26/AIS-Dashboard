@@ -1,0 +1,86 @@
+Backend
+Language & Framework
+
+Python 3.11+ with FastAPI — async web framework
+Uvicorn — ASGI server that runs the FastAPI app
+Azure Integration
+
+MSAL (microsoft-authentication-library) — Service Principal auth, silent token caching
+httpx — async HTTP client for all Azure ARM API calls, shared connection pool with retry logic
+Authentication
+
+python-jose — JWT signing/verification (HS256)
+Custom auth.py with FastAPI Depends() for route-level enforcement
+Key files
+
+backend/
+├── main.py               # FastAPI app, CORS, static file serving
+├── config.py             # Pydantic settings (reads from .env)
+├── auth.py               # JWT helpers + get_current_user / require_admin
+├── routers/
+│   ├── auth.py           # POST /api/auth/login
+│   └── workflows.py      # All /api/workflows/* routes
+└── services/
+    └── azure_client.py   # AzureClient class + get_client(sub_id) registry
+Azure APIs used
+
+management.azure.com — Azure Resource Manager (ARM)
+API version 2022-03-01 for Microsoft.Web/sites (Standard Logic Apps)
+ARM hostruntime path pattern for workflow operations
+Pre-signed Azure Storage URLs fetched directly (inputs/outputs payloads)
+Frontend
+Language & Framework
+
+React 18 with React Router v6 — SPA with client-side routing
+Vite — dev server (HMR) + production bundler
+Styling
+
+No CSS framework — all styles are plain JS objects (inline styles)
+Single shared colour palette constant C at the top of each component
+State management
+
+None — no Redux/Zustand/Context; each component manages its own local state with useState / useCallback / useMemo
+Key files
+
+frontend/src/
+├── App.jsx               # Routes + ProtectedRoute wrapper
+├── auth.js               # Token helpers (localStorage, JWT decode)
+├── api/
+│   └── client.js         # fetch() wrapper — adds Authorization header, handles 401
+└── components/
+    ├── Login.jsx          # Login form
+    ├── Layout.jsx         # App shell — header, breadcrumbs, user chip, logout
+    ├── Dashboard.jsx      # Workflow table + summary cards + filters
+    ├── WorkflowDetail.jsx # Run history list + enable/disable toggle
+    ├── RunDetail.jsx      # Per-action accordion with inputs/outputs
+    └── StatusBadge.jsx    # Reusable coloured status chip
+Third-party libraries
+
+lucide-react — icons (RefreshCw, Search, Play, Pause, etc.)
+date-fns — date formatting (format, formatDistanceToNow)
+Data flow
+Browser
+  │
+  ├─ GET /api/workflows          → FastAPI → ARM (parallel: sites + workflows)
+  ├─ GET /api/workflows/last-runs → FastAPI → ARM (background, semaphore 4)
+  ├─ GET /api/workflows/summary  → FastAPI → ARM (parallel)
+  └─ POST /api/auth/login        → FastAPI → in-memory user check → JWT
+Project structure
+azure-logicapps-dashboard/
+├── backend/               # Python / FastAPI
+│   ├── .env               # Secrets (not committed)
+│   ├── env.example        # Template
+│   └── requirements.txt
+├── frontend/              # React / Vite
+│   ├── src/
+│   └── package.json
+├── start.ps1              # Dev: opens backend + frontend in separate windows
+└── build-prod.ps1         # Prod: builds React bundle, FastAPI serves it
+Dev mode — two separate servers:
+
+Backend: localhost:8000
+Frontend: localhost:3000 (Vite proxies /api → backend)
+Production mode — single server:
+
+FastAPI serves the compiled React dist/ bundle at /
+All API and static assets on port 8000

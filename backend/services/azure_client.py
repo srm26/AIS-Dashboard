@@ -1,26 +1,29 @@
 import asyncio
-import json
+import time
 import httpx
-import msal
 from typing import Any, Dict, List, Optional
+from azure.identity import DefaultAzureCredential
 from config import settings
 
 MGMT_BASE = "https://management.azure.com"
 WEB_API_VERSION = "2022-03-01"   # Standard Logic Apps (Microsoft.Web/sites)
 LOGIC_API_VERSION = "2016-06-01" # Consumption Logic Apps (Microsoft.Logic/workflows)
-SCOPE = ["https://management.azure.com/.default"]
+SCOPE = "https://management.azure.com/.default"
 
 _MAX_RETRIES = 4
 _RETRY_BASE_DELAY = 2.0  # seconds; doubles each attempt unless Retry-After is given
 
 
 class AzureClient:
-    def __init__(self, tenant_id: str, client_id: str, client_secret: str):
-        self._app = msal.ConfidentialClientApplication(
-            client_id,
-            authority=f"https://login.microsoftonline.com/{tenant_id}",
-            client_credential=client_secret,
+    def __init__(self, client_id: Optional[str] = None):
+        # client_id targets a specific user-assigned managed identity;
+        # None uses system-assigned MI (or AzureCliCredential locally via DefaultAzureCredential)
+        self._credential = DefaultAzureCredential(
+            managed_identity_client_id=client_id or None,
+            exclude_shared_token_cache_credential=True,
         )
+        self._token: Optional[str] = None
+        self._token_expiry: float = 0.0
         # Shared client — reuses TCP connections across concurrent requests
         self._http = httpx.AsyncClient(
             timeout=30,
@@ -28,15 +31,21 @@ class AzureClient:
         )
 
     def _get_token(self) -> str:
-        result = self._app.acquire_token_silent(SCOPE, account=None)
-        if not result:
-            result = self._app.acquire_token_for_client(scopes=SCOPE)
-        if "access_token" not in result:
-            raise RuntimeError(f"Token acquisition failed: {result.get('error_description')}")
-        return result["access_token"]
+        # Re-use cached token until 5 minutes before expiry
+        now = time.time()
+        if self._token and self._token_expiry - now > 300:
+            return self._token
+        token = self._credential.get_token(SCOPE)
+        self._token = token.token
+        self._token_expiry = token.expires_on
+        return self._token
 
-    def _headers(self) -> Dict[str, str]:
-        return {"Authorization": f"Bearer {self._get_token()}"}
+    async def _get_token_async(self) -> str:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._get_token)
+
+    async def _headers(self) -> Dict[str, str]:
+        return {"Authorization": f"Bearer {await self._get_token_async()}"}
 
     async def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
         """Execute an HTTP request with automatic retry on 429 (respects Retry-After)."""
@@ -47,25 +56,25 @@ class AzureClient:
                 resp.raise_for_status()
                 return resp
             if attempt == _MAX_RETRIES:
-                resp.raise_for_status()  # raise the 429 after exhausting retries
+                resp.raise_for_status()
             retry_after = resp.headers.get("Retry-After")
             wait = float(retry_after) if retry_after else delay
             await asyncio.sleep(wait)
-            delay *= 2  # exponential backoff if no Retry-After header
+            delay *= 2
 
     async def get(self, path: str, params: Optional[Dict] = None, api_version: str = WEB_API_VERSION) -> Any:
         url = f"{MGMT_BASE}{path}"
         p = {"api-version": api_version}
         if params:
             p.update(params)
-        resp = await self._request("GET", url, headers=self._headers(), params=p)
+        resp = await self._request("GET", url, headers=await self._headers(), params=p)
         return resp.json()
 
     async def post(self, path: str, json: Optional[Dict] = None, api_version: str = WEB_API_VERSION) -> Any:
         url = f"{MGMT_BASE}{path}"
         resp = await self._request(
             "POST", url,
-            headers=self._headers(),
+            headers=await self._headers(),
             params={"api-version": api_version},
             json=json or {},
         )
@@ -77,41 +86,21 @@ class AzureClient:
         results.extend(data.get("value", []))
         next_link = data.get("nextLink")
         while next_link:
-            resp = await self._request("GET", next_link, headers=self._headers())
+            resp = await self._request("GET", next_link, headers=await self._headers())
             page = resp.json()
             results.extend(page.get("value", []))
             next_link = page.get("nextLink")
         return results
 
 
-# ---------------------------------------------------------------------------
-# Client registry — global default + optional per-subscription overrides
-# ---------------------------------------------------------------------------
-
-# Global default: uses the top-level AZURE_* credentials in .env
+# Single global client — all subscriptions use the same managed identity.
+# Set AZURE_MANAGED_IDENTITY_CLIENT_ID to target a specific user-assigned identity;
+# leave unset for system-assigned.
 _default_client = AzureClient(
-    settings.azure_tenant_id,
-    settings.azure_client_id,
-    settings.azure_client_secret,
+    client_id=settings.azure_managed_identity_client_id or None,
 )
 
-# Per-subscription overrides parsed from AZURE_SPNS (JSON array)
-# Format: [{"subscription_id":"...","tenant_id":"...","client_id":"...","client_secret":"..."}]
-_per_sub_clients: Dict[str, AzureClient] = {}
 
-try:
-    _spn_entries = json.loads(settings.azure_spns or "[]")
-    for _entry in _spn_entries:
-        _per_sub_clients[_entry["subscription_id"]] = AzureClient(
-            _entry["tenant_id"],
-            _entry["client_id"],
-            _entry["client_secret"],
-        )
-except Exception as _e:
-    import warnings
-    warnings.warn(f"Failed to parse AZURE_SPNS: {_e}")
-
-
-def get_client(subscription_id: str) -> AzureClient:
-    """Return the SPN client for the given subscription, or the global default."""
-    return _per_sub_clients.get(subscription_id, _default_client)
+def get_client(_subscription_id: str) -> AzureClient:
+    """Return the Azure client for the given subscription."""
+    return _default_client
