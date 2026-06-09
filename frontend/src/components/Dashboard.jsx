@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { RefreshCw, Search, CheckCircle, XCircle, Activity } from "lucide-react";
 import { api } from "../api/client";
@@ -52,6 +52,7 @@ const s = {
 
 const STATE_FILTERS = ["All", "Enabled", "Disabled"];
 
+
 // Persist data across remounts so dropdowns and counts are never blank on back-navigation
 let _subsCache = [];
 let _wfCache = [];
@@ -67,11 +68,13 @@ export default function Dashboard() {
   const [lastRunsLoading, setLastRunsLoading] = useState(true);
   const [subscriptions, setSubscriptions] = useState(_subsCache);
   const [summary, setSummary] = useState(null);
+  const failedWorkflowIds = useMemo(() => new Set(summary?.failedWorkflowIds || []), [summary]);
   const [loading, setLoading] = useState(_wfCache.length === 0);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
   const [stateFilter, setStateFilter] = useState("All");
+  const [failedTodayFilter, setFailedTodayFilter] = useState(false);
   const saved = getSavedFilters();
   const [selectedSub, setSelectedSub] = useState(saved.sub || "");
   const [selectedSite, setSelectedSite] = useState(saved.site || "");
@@ -94,10 +97,15 @@ export default function Dashboard() {
     finally { setLastRunsLoading(false); }
   }, []);
 
+  const summarySeq = useRef(0);
   const loadSummary = useCallback(async (subId = "", siteName = "") => {
+    const seq = ++summarySeq.current;
     setSummaryLoading(true);
-    try { setSummary(await api.getSummary(subId, siteName)); }
-    catch {} finally { setSummaryLoading(false); }
+    try {
+      const data = await api.getSummary(subId, siteName);
+      if (seq === summarySeq.current) setSummary(data);
+    } catch {}
+    finally { if (seq === summarySeq.current) setSummaryLoading(false); }
   }, []);
 
   const loadSubscriptions = useCallback(async () => {
@@ -110,9 +118,8 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadWorkflows();
-    loadSummary();
     loadSubscriptions();
-  }, [loadWorkflows, loadSummary, loadSubscriptions]);
+  }, [loadWorkflows, loadSubscriptions]);
 
   // Persist filter selections so they survive back-navigation
   useEffect(() => {
@@ -147,8 +154,10 @@ export default function Dashboard() {
       wf.siteName.toLowerCase().includes(q) ||
       wf.resourceGroup.toLowerCase().includes(q);
     const matchState = stateFilter === "All" || wf.state === stateFilter;
-    return matchSearch && matchState;
-  }), [subSiteWorkflows, search, stateFilter]);
+    if (!matchSearch || !matchState) return false;
+    if (failedTodayFilter) return failedWorkflowIds.has(wf.id);
+    return true;
+  }), [subSiteWorkflows, search, stateFilter, failedTodayFilter, failedWorkflowIds]);
 
   const refresh = () => { loadWorkflows(); loadSummary(selectedSub, selectedSite); setLastRuns({}); };
 
@@ -158,7 +167,8 @@ export default function Dashboard() {
         <SummaryCard label="Total Workflows"  value={subSiteWorkflows.length}                                          loading={loading} accent={C.blue} />
         <SummaryCard label="Enabled"          value={subSiteWorkflows.filter(w => w.state !== "Disabled").length}    loading={loading} accent={C.green} />
         <SummaryCard label="Runs Today"       value={summary?.runsToday ?? "-"}                                      loading={summaryLoading} accent={C.gold} />
-        <SummaryCard label="Failed Today"     value={summary?.failedToday ?? "-"}                                    loading={summaryLoading} accent={C.orange} />
+        <SummaryCard label="Failed Today"     value={summary?.failedToday ?? "-"}                                    loading={summaryLoading} accent={C.orange}
+          active={failedTodayFilter} onClick={() => setFailedTodayFilter(v => !v)} />
       </div>
 
       {error && <div style={s.err}>{error}</div>}
@@ -248,10 +258,25 @@ export default function Dashboard() {
   );
 }
 
-function SummaryCard({ label, value, loading, accent }) {
+function SummaryCard({ label, value, loading, accent, onClick, active }) {
+  const [hovered, setHovered] = useState(false);
+  const clickable = !!onClick;
   return (
-    <div style={{ ...s.card, borderTop: `3px solid ${accent}` }}>
-      <div style={s.cardLabel}>{label}</div>
+    <div
+      style={{
+        ...s.card,
+        borderTop: `3px solid ${accent}`,
+        ...(clickable && { cursor: "pointer", outline: active ? `2px solid ${accent}` : "none", outlineOffset: 2 }),
+        ...(clickable && hovered && { background: C.hover }),
+      }}
+      onClick={onClick}
+      onMouseEnter={() => clickable && setHovered(true)}
+      onMouseLeave={() => clickable && setHovered(false)}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <div style={s.cardLabel}>{label}</div>
+        {active && <span style={{ fontSize: 10, color: accent, border: `1px solid ${accent}`, borderRadius: 4, padding: "1px 6px", fontWeight: 600 }}>ACTIVE</span>}
+      </div>
       <div style={{ ...s.cardValue, color: accent }}>{loading ? "..." : value}</div>
     </div>
   );

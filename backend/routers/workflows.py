@@ -233,16 +233,18 @@ async def get_summary(
                     if (r.get("properties") or {}).get("status") == "Failed"
                     or r.get("status") == "Failed"
                 )
-                return len(runs), failed
+                return item["id"], len(runs), failed
             except Exception:
-                return 0, 0
+                return item["id"], 0, 0
 
     run_results = await asyncio.gather(*[_fetch_today_runs(item) for item in specs])
-    today_runs = sum(c for c, _ in run_results)
-    today_failed = sum(f for _, f in run_results)
+    today_runs = sum(c for _, c, _ in run_results)
+    today_failed = sum(f for _, _, f in run_results)
+    failed_workflow_ids = [wf_id for wf_id, _, f in run_results if f > 0]
 
     return {"total": total, "enabled": enabled, "disabled": total - enabled,
-            "runsToday": today_runs, "failedToday": today_failed}
+            "runsToday": today_runs, "failedToday": today_failed,
+            "failedWorkflowIds": failed_workflow_ids}
 
 
 @router.get("/{subscription_id}/{resource_group}/{site_name}/{workflow_name}/runs")
