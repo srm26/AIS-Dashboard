@@ -113,9 +113,8 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadWorkflows();
-    loadSummary();
     loadSubscriptions();
-  }, [loadWorkflows, loadSummary, loadSubscriptions]);
+  }, [loadWorkflows, loadSubscriptions]);
 
   // Persist filter selections so they survive back-navigation
   useEffect(() => {
