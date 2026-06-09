@@ -52,14 +52,6 @@ const s = {
 
 const STATE_FILTERS = ["All", "Enabled", "Disabled"];
 
-function isToday(dateStr) {
-  if (!dateStr) return false;
-  const d = new Date(dateStr);
-  const now = new Date();
-  return d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate();
-}
 
 // Persist data across remounts so dropdowns and counts are never blank on back-navigation
 let _subsCache = [];
@@ -76,6 +68,7 @@ export default function Dashboard() {
   const [lastRunsLoading, setLastRunsLoading] = useState(true);
   const [subscriptions, setSubscriptions] = useState(_subsCache);
   const [summary, setSummary] = useState(null);
+  const failedWorkflowIds = useMemo(() => new Set(summary?.failedWorkflowIds || []), [summary]);
   const [loading, setLoading] = useState(_wfCache.length === 0);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -158,12 +151,9 @@ export default function Dashboard() {
       wf.resourceGroup.toLowerCase().includes(q);
     const matchState = stateFilter === "All" || wf.state === stateFilter;
     if (!matchSearch || !matchState) return false;
-    if (failedTodayFilter) {
-      const lr = lastRuns[wf.id];
-      return lr?.lastRunStatus === "Failed" && isToday(lr?.lastRunTime);
-    }
+    if (failedTodayFilter) return failedWorkflowIds.has(wf.id);
     return true;
-  }), [subSiteWorkflows, search, stateFilter, failedTodayFilter, lastRuns]);
+  }), [subSiteWorkflows, search, stateFilter, failedTodayFilter, failedWorkflowIds]);
 
   const refresh = () => { loadWorkflows(); loadSummary(selectedSub, selectedSite); setLastRuns({}); };
 
