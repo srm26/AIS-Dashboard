@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { RefreshCw, Search, CheckCircle, XCircle, Activity } from "lucide-react";
 import { api } from "../api/client";
@@ -97,10 +97,15 @@ export default function Dashboard() {
     finally { setLastRunsLoading(false); }
   }, []);
 
+  const summarySeq = useRef(0);
   const loadSummary = useCallback(async (subId = "", siteName = "") => {
+    const seq = ++summarySeq.current;
     setSummaryLoading(true);
-    try { setSummary(await api.getSummary(subId, siteName)); }
-    catch {} finally { setSummaryLoading(false); }
+    try {
+      const data = await api.getSummary(subId, siteName);
+      if (seq === summarySeq.current) setSummary(data);
+    } catch {}
+    finally { if (seq === summarySeq.current) setSummaryLoading(false); }
   }, []);
 
   const loadSubscriptions = useCallback(async () => {
