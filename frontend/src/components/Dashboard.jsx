@@ -254,6 +254,20 @@ export default function Dashboard() {
           </table>
         )}
       </div>
+
+      <ComingSoonTable title="Data Products" />
+      <ComingSoonTable title="AI Agents" />
+    </div>
+  );
+}
+
+function ComingSoonTable({ title }) {
+  return (
+    <div style={{ marginTop: 32 }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: C.textPri, marginBottom: 12 }}>{title}</div>
+      <div style={{ ...s.panel, display: "flex", alignItems: "center", justifyContent: "center", padding: "56px 0", color: C.textMute, fontSize: 15, fontStyle: "italic" }}>
+        Coming soon...
+      </div>
     </div>
   );
 }
