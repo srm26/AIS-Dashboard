@@ -128,10 +128,10 @@ async def _get_last_run(sub_id: str, rg: str, site_name: str, wf_name: str,
                         sem: asyncio.Semaphore) -> dict:
     async with sem:
         try:
-            runs = await get_client(sub_id).paginate(
+            data = await get_client(sub_id).get(
                 f"{_hostruntime(sub_id, rg, site_name, wf_name)}/runs",
-                params={"$top": "1"},
             )
+            runs = data.get("value", [])
             if runs:
                 r = runs[0]
                 props = r.get("properties") or {}
@@ -260,7 +260,8 @@ async def list_runs(
 ):
     path = f"{_hostruntime(subscription_id, resource_group, site_name, workflow_name)}/runs"
     try:
-        runs = await get_client(subscription_id).paginate(path, params={"$top": top})
+        data = await get_client(subscription_id).get(path)
+        runs = data.get("value", [])[:top]
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
