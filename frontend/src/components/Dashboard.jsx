@@ -76,7 +76,7 @@ export default function Dashboard() {
   const [stateFilter, setStateFilter] = useState("All");
   const [failedTodayFilter, setFailedTodayFilter] = useState(false);
   const saved = getSavedFilters();
-  const [selectedSub, setSelectedSub] = useState(saved.sub || "");
+  const [selectedSub, setSelectedSub] = useState(Array.isArray(saved.sub) ? saved.sub : (saved.sub ? [saved.sub] : []));
   const [selectedSite, setSelectedSite] = useState(saved.site || "");
 
   const loadWorkflows = useCallback(async () => {
@@ -128,22 +128,23 @@ export default function Dashboard() {
 
   // Refresh summary counts whenever subscription or site filter changes
   useEffect(() => {
-    loadSummary(selectedSub, selectedSite);
+    const subId = selectedSub.length === 1 ? selectedSub[0] : "";
+    loadSummary(subId, selectedSite);
   }, [selectedSub, selectedSite, loadSummary]);
 
   // When subscription changes, reset site filter
   const handleSubChange = (val) => { setSelectedSub(val); setSelectedSite(""); };
 
-  // Sites available for the selected subscription (or all)
+  // Sites available for the selected subscriptions (or all)
   const availableSites = useMemo(() => {
-    const pool = selectedSub ? workflows.filter(w => w.subscriptionId === selectedSub) : workflows;
+    const pool = selectedSub.length ? workflows.filter(w => selectedSub.includes(w.subscriptionId)) : workflows;
     return [...new Set(pool.map(w => w.siteName))].sort();
   }, [workflows, selectedSub]);
 
   // Total and Enabled computed locally — no extra API call needed
   const subSiteWorkflows = useMemo(() =>
     workflows.filter(wf =>
-      (!selectedSub  || wf.subscriptionId === selectedSub) &&
+      (!selectedSub.length || selectedSub.includes(wf.subscriptionId)) &&
       (!selectedSite || wf.siteName === selectedSite)
     ), [workflows, selectedSub, selectedSite]);
 
@@ -196,12 +197,12 @@ export default function Dashboard() {
           {error && <div style={s.err}>{error}</div>}
 
           <div style={s.toolbar}>
-            <div style={{ position: "relative" }}>
-              <select style={selectStyle} value={selectedSub} onChange={e => handleSubChange(e.target.value)}>
-                <option value="">All Subscriptions</option>
-                {subscriptions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            </div>
+            <MultiSelectDropdown
+              options={subscriptions.map(s => ({ id: s.id, label: s.name }))}
+              selected={selectedSub}
+              onChange={handleSubChange}
+              placeholder="All Subscriptions"
+            />
             <div style={{ position: "relative" }}>
               <select style={{ ...selectStyle, minWidth: 220 }} value={selectedSite} onChange={e => setSelectedSite(e.target.value)}>
                 <option value="">All Logic Apps</option>
@@ -274,6 +275,73 @@ export default function Dashboard() {
       {(activeTab === "data-products" || activeTab === "ai-agents") && (
         <div style={{ ...s.panel, display: "flex", alignItems: "center", justifyContent: "center", padding: "80px 0", color: C.textMute, fontSize: 16, fontStyle: "italic" }}>
           Coming soon...
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MultiSelectDropdown({ options, selected, onChange, placeholder }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const filtered = options.filter(o => o.label.toLowerCase().includes(search.toLowerCase()));
+  const toggle = (id) => onChange(selected.includes(id) ? selected.filter(s => s !== id) : [...selected, id]);
+  const label = selected.length === 0 ? placeholder : `${selected.length} subscription${selected.length > 1 ? "s" : ""} selected`;
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button onClick={() => setOpen(v => !v)} style={{
+        ...selectStyle, minWidth: 200, display: "flex", alignItems: "center", justifyContent: "space-between",
+        cursor: "pointer", userSelect: "none",
+      }}>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 100, minWidth: 260,
+          background: "#0a2e44", border: `1px solid ${C.border}`, borderRadius: 6,
+          boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+        }}>
+          <div style={{ padding: "8px 10px", borderBottom: `1px solid ${C.border}` }}>
+            <input
+              autoFocus
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search subscriptions..."
+              style={{ ...selectStyle, width: "100%", padding: "6px 10px", minWidth: 0, backgroundImage: "none" }}
+            />
+          </div>
+          {selected.length > 0 && (
+            <div style={{ padding: "6px 10px", borderBottom: `1px solid ${C.border}` }}>
+              <button onClick={() => onChange([])} style={{ background: "none", border: "none", color: C.blue, fontSize: 12, cursor: "pointer", padding: 0 }}>
+                Clear all ({selected.length})
+              </button>
+            </div>
+          )}
+          <div style={{ maxHeight: 220, overflowY: "auto" }}>
+            {filtered.length === 0
+              ? <div style={{ padding: "12px 14px", color: C.textMute, fontSize: 13 }}>No matches</div>
+              : filtered.map(o => (
+                <label key={o.id} style={{
+                  display: "flex", alignItems: "center", gap: 10, padding: "8px 14px",
+                  cursor: "pointer", fontSize: 13, color: C.textSec,
+                  background: selected.includes(o.id) ? C.hover : "none",
+                }}>
+                  <input type="checkbox" checked={selected.includes(o.id)} onChange={() => toggle(o.id)}
+                    style={{ accentColor: C.blue, width: 14, height: 14, cursor: "pointer" }} />
+                  {o.label}
+                </label>
+              ))
+            }
+          </div>
         </div>
       )}
     </div>
