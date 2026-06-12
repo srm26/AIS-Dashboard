@@ -98,19 +98,24 @@ async def _get_all_workflow_specs(force: bool = False) -> List[dict]:
 def _workflow_state(wf: dict) -> str:
     props = wf.get("properties", {})
 
-    # 1. properties.state is the authoritative runtime state — check it first
+    # 1. flowState is the Standard Logic Apps runtime enabled/disabled field
+    flow_state = props.get("flowState", "")
+    if flow_state:
+        return flow_state.capitalize()
+
+    # 2. properties.state — set by ARM-level disable/enable
     props_state = props.get("state", "")
     if props_state:
         return props_state.capitalize()
 
-    # 2. Fall back to embedded workflow.json definition state
+    # 3. Fall back to embedded workflow.json definition state
     files = props.get("files") or {}
     wf_json = files.get("workflow.json") or {}
     state = wf_json.get("state", "")
     if state:
         return state.capitalize()
 
-    # 3. Fall back to health — only treat Healthy as Enabled; absent health ≠ Enabled
+    # 4. Fall back to health — only treat Healthy as Enabled; absent health ≠ Enabled
     health = (props.get("health") or {}).get("state", "")
     if health == "Healthy":
         return "Enabled"
@@ -180,6 +185,7 @@ async def list_workflows(_: dict = Depends(get_current_user)):
             "location": item["wf"].get("location", ""),
             "state": _workflow_state(item["wf"]),
             "tags": item["wf"].get("tags", {}),
+            "_rawState": {k: item["wf"].get("properties", {}).get(k) for k in ("state", "flowState", "health")},
         }
         for item in specs
     ]
@@ -374,6 +380,7 @@ async def disable_workflow(
         await get_client(subscription_id).post(f"{_hostruntime(subscription_id, resource_group, site_name, workflow_name)}/disable")
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
+    _wf_cache["data"] = None
     return {"status": "disabled"}
 
 
@@ -386,4 +393,5 @@ async def enable_workflow(
         await get_client(subscription_id).post(f"{_hostruntime(subscription_id, resource_group, site_name, workflow_name)}/enable")
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
+    _wf_cache["data"] = None
     return {"status": "enabled"}
