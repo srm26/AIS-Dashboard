@@ -302,7 +302,7 @@ function MultiSelectDropdown({ options, selected, onChange, placeholder }) {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const filtered = options.filter(o => o.label.toLowerCase().includes(search.toLowerCase()));
+  const filtered = options.filter(o => (o.label || "").toLowerCase().includes(search.toLowerCase()));
   const toggle = (id) => onChange(selected.includes(id) ? selected.filter(s => s !== id) : [...selected, id]);
   const label = selected.length === 0 ? placeholder : `${selected.length} subscription${selected.length > 1 ? "s" : ""} selected`;
 
@@ -337,7 +337,7 @@ function MultiSelectDropdown({ options, selected, onChange, placeholder }) {
             </div>
           )}
           <div style={{ maxHeight: 220, overflowY: "auto" }}>
-            {filtered.length === 0
+            {filtered.length === 0 && search
               ? <div style={{ padding: "12px 14px", color: C.textMute, fontSize: 13 }}>No matches</div>
               : filtered.map(o => (
                 <label key={o.id} style={{
