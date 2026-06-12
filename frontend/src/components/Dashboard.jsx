@@ -98,11 +98,21 @@ export default function Dashboard() {
   }, []);
 
   const summarySeq = useRef(0);
-  const loadSummary = useCallback(async (subId = "", siteName = "") => {
+  const loadSummary = useCallback(async (subIds = [], siteName = "") => {
     const seq = ++summarySeq.current;
     setSummaryLoading(true);
     try {
-      const data = await api.getSummary(subId, siteName);
+      let data;
+      if (subIds.length <= 1) {
+        data = await api.getSummary(subIds[0] || "", siteName);
+      } else {
+        const results = await Promise.all(subIds.map(id => api.getSummary(id, siteName)));
+        data = {
+          runsToday: results.reduce((sum, r) => sum + (r.runsToday || 0), 0),
+          failedToday: results.reduce((sum, r) => sum + (r.failedToday || 0), 0),
+          failedWorkflowIds: results.flatMap(r => r.failedWorkflowIds || []),
+        };
+      }
       if (seq === summarySeq.current) setSummary(data);
     } catch {}
     finally { if (seq === summarySeq.current) setSummaryLoading(false); }
@@ -128,8 +138,7 @@ export default function Dashboard() {
 
   // Refresh summary counts whenever subscription or site filter changes
   useEffect(() => {
-    const subId = selectedSub.length === 1 ? selectedSub[0] : "";
-    loadSummary(subId, selectedSite);
+    loadSummary(selectedSub, selectedSite);
   }, [selectedSub, selectedSite, loadSummary]);
 
   // When subscription changes, reset site filter
@@ -161,6 +170,7 @@ export default function Dashboard() {
   }), [subSiteWorkflows, search, stateFilter, failedTodayFilter, failedWorkflowIds]);
 
   const refresh = () => { loadWorkflows(); loadSummary(selectedSub, selectedSite); setLastRuns({}); };
+
   const [activeTab, setActiveTab] = useState("integrations");
 
   const TABS = ["Integrations", "Data Products", "AI Agents"];

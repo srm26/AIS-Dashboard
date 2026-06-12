@@ -98,17 +98,17 @@ async def _get_all_workflow_specs(force: bool = False) -> List[dict]:
 def _workflow_state(wf: dict) -> str:
     props = wf.get("properties", {})
 
-    # 1. Check embedded workflow.json definition state
+    # 1. properties.state is the authoritative runtime state — check it first
+    props_state = props.get("state", "")
+    if props_state:
+        return props_state.capitalize()
+
+    # 2. Fall back to embedded workflow.json definition state
     files = props.get("files") or {}
     wf_json = files.get("workflow.json") or {}
     state = wf_json.get("state", "")
     if state:
         return state.capitalize()
-
-    # 2. Check top-level properties.state (set when workflow is disabled via API)
-    props_state = props.get("state", "")
-    if props_state:
-        return props_state.capitalize()
 
     # 3. Fall back to health — only treat Healthy as Enabled; absent health ≠ Enabled
     health = (props.get("health") or {}).get("state", "")
