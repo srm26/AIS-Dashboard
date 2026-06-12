@@ -160,114 +160,122 @@ export default function Dashboard() {
   }), [subSiteWorkflows, search, stateFilter, failedTodayFilter, failedWorkflowIds]);
 
   const refresh = () => { loadWorkflows(); loadSummary(selectedSub, selectedSite); setLastRuns({}); };
+  const [activeTab, setActiveTab] = useState("integrations");
+
+  const TABS = ["Integrations", "Data Products", "AI Agents"];
 
   return (
     <div>
-      <div style={s.grid}>
-        <SummaryCard label="Total Workflows"  value={subSiteWorkflows.length}                                          loading={loading} accent={C.blue} />
-        <SummaryCard label="Enabled"          value={subSiteWorkflows.filter(w => w.state !== "Disabled").length}    loading={loading} accent={C.green} />
-        <SummaryCard label="Runs Today"       value={summary?.runsToday ?? "-"}                                      loading={summaryLoading} accent={C.gold} />
-        <SummaryCard label="Failed Today"     value={summary?.failedToday ?? "-"}                                    loading={summaryLoading} accent={C.orange}
-          active={failedTodayFilter} onClick={() => setFailedTodayFilter(v => !v)} />
+      {/* Tab bar */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 24, borderBottom: `1px solid ${C.border}` }}>
+        {TABS.map(tab => {
+          const key = tab.toLowerCase().replace(" ", "-");
+          const active = activeTab === key;
+          return (
+            <button key={key} onClick={() => setActiveTab(key)} style={{
+              padding: "10px 24px", fontSize: 14, fontWeight: 600, cursor: "pointer",
+              background: "none", border: "none", borderBottom: active ? `2px solid ${C.blue}` : "2px solid transparent",
+              color: active ? C.blue : C.textSec, marginBottom: -1,
+            }}>
+              {tab}
+            </button>
+          );
+        })}
       </div>
 
-      {error && <div style={s.err}>{error}</div>}
+      {activeTab === "integrations" && (
+        <>
+          <div style={s.grid}>
+            <SummaryCard label="Total Workflows"  value={subSiteWorkflows.length}                                          loading={loading} accent={C.blue} />
+            <SummaryCard label="Enabled"          value={subSiteWorkflows.filter(w => w.state !== "Disabled").length}    loading={loading} accent={C.green} />
+            <SummaryCard label="Runs Today"       value={summary?.runsToday ?? "-"}                                      loading={summaryLoading} accent={C.gold} />
+            <SummaryCard label="Failed Today"     value={summary?.failedToday ?? "-"}                                    loading={summaryLoading} accent={C.orange}
+              active={failedTodayFilter} onClick={() => setFailedTodayFilter(v => !v)} />
+          </div>
 
-      <div style={s.toolbar}>
-        {/* Subscription dropdown */}
-        <div style={{ position: "relative" }}>
-          <select style={selectStyle} value={selectedSub} onChange={e => handleSubChange(e.target.value)}>
-            <option value="">All Subscriptions</option>
-            {subscriptions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
-        </div>
+          {error && <div style={s.err}>{error}</div>}
 
-        {/* Logic App (site) dropdown */}
-        <div style={{ position: "relative" }}>
-          <select style={{ ...selectStyle, minWidth: 220 }} value={selectedSite} onChange={e => setSelectedSite(e.target.value)}>
-            <option value="">All Logic Apps</option>
-            {availableSites.map(site => <option key={site} value={site}>{site}</option>)}
-          </select>
-        </div>
+          <div style={s.toolbar}>
+            <div style={{ position: "relative" }}>
+              <select style={selectStyle} value={selectedSub} onChange={e => handleSubChange(e.target.value)}>
+                <option value="">All Subscriptions</option>
+                {subscriptions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div style={{ position: "relative" }}>
+              <select style={{ ...selectStyle, minWidth: 220 }} value={selectedSite} onChange={e => setSelectedSite(e.target.value)}>
+                <option value="">All Logic Apps</option>
+                {availableSites.map(site => <option key={site} value={site}>{site}</option>)}
+              </select>
+            </div>
+            <div style={s.searchWrap}>
+              <Search size={14} style={s.searchIcon} />
+              <input style={s.input} placeholder="Search workflows..." value={search} onChange={e => setSearch(e.target.value)} />
+            </div>
+            {STATE_FILTERS.map(f => (
+              <button key={f} style={s.filterBtn(stateFilter === f)} onClick={() => setStateFilter(f)}>{f}</button>
+            ))}
+            <button style={s.refreshBtn} onClick={refresh}><RefreshCw size={14} /> Refresh</button>
+          </div>
 
-        {/* Search */}
-        <div style={s.searchWrap}>
-          <Search size={14} style={s.searchIcon} />
-          <input style={s.input} placeholder="Search workflows..." value={search} onChange={e => setSearch(e.target.value)} />
-        </div>
-
-        {/* State filters */}
-        {STATE_FILTERS.map(f => (
-          <button key={f} style={s.filterBtn(stateFilter === f)} onClick={() => setStateFilter(f)}>{f}</button>
-        ))}
-
-        <button style={s.refreshBtn} onClick={refresh}><RefreshCw size={14} /> Refresh</button>
-      </div>
-
-      <div style={s.panel}>
-        {loading ? (
-          <div style={s.empty}>Loading workflows...</div>
-        ) : filtered.length === 0 ? (
-          <div style={s.empty}>No workflows found.</div>
-        ) : (
-          <table style={s.table}>
-            <thead>
-              <tr>
-                {["Workflow", "Logic App", "Subscription", "State", "Last Run", "Last Run Status"].map(h => (
-                  <th key={h} style={s.th}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(wf => {
-                const lr = lastRuns[wf.id];
-                const lastRunTime = lr?.lastRunTime;
-                const lastRunStatus = lr?.lastRunStatus;
-                return (
-                  <tr key={wf.id} style={s.tr}
-                    onClick={() => navigate(`/workflow/${wf.subscriptionId}/${wf.resourceGroup}/${wf.siteName}/${wf.name}`)}
-                    onMouseEnter={e => e.currentTarget.style.background = C.hover}
-                    onMouseLeave={e => e.currentTarget.style.background = ""}
-                  >
-                    <td style={{ ...s.td, color: C.blue, fontWeight: 600 }}>{wf.name}</td>
-                    <td style={s.td}>{wf.siteName}</td>
-                    <td style={{ ...s.td, fontSize: 13 }}>{wf.subscriptionName || wf.subscriptionId.slice(0, 8) + "..."}</td>
-                    <td style={s.td}><StatusBadge status={wf.state} /></td>
-                    <td style={{ ...s.td, fontSize: 12, color: C.textMute }}>
-                      {lastRunsLoading && !lr
-                        ? <span style={{ color: "#444" }}>...</span>
-                        : lastRunTime
-                          ? <span title={format(new Date(lastRunTime), "PPpp")}>
-                              {formatDistanceToNow(new Date(lastRunTime), { addSuffix: true })}
-                            </span>
-                          : <span style={{ color: "#444" }}>No runs</span>}
-                    </td>
-                    <td style={s.td}>
-                      {lastRunsLoading && !lr
-                        ? <span style={{ color: "#444" }}>...</span>
-                        : lastRunStatus ? <StatusBadge status={lastRunStatus} /> : "-"}
-                    </td>
+          <div style={s.panel}>
+            {loading ? (
+              <div style={s.empty}>Loading workflows...</div>
+            ) : filtered.length === 0 ? (
+              <div style={s.empty}>No workflows found.</div>
+            ) : (
+              <table style={s.table}>
+                <thead>
+                  <tr>
+                    {["Workflow", "Logic App", "Subscription", "State", "Last Run", "Last Run Status"].map(h => (
+                      <th key={h} style={s.th}>{h}</th>
+                    ))}
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
+                </thead>
+                <tbody>
+                  {filtered.map(wf => {
+                    const lr = lastRuns[wf.id];
+                    const lastRunTime = lr?.lastRunTime;
+                    const lastRunStatus = lr?.lastRunStatus;
+                    return (
+                      <tr key={wf.id} style={s.tr}
+                        onClick={() => navigate(`/workflow/${wf.subscriptionId}/${wf.resourceGroup}/${wf.siteName}/${wf.name}`)}
+                        onMouseEnter={e => e.currentTarget.style.background = C.hover}
+                        onMouseLeave={e => e.currentTarget.style.background = ""}
+                      >
+                        <td style={{ ...s.td, color: C.blue, fontWeight: 600 }}>{wf.name}</td>
+                        <td style={s.td}>{wf.siteName}</td>
+                        <td style={{ ...s.td, fontSize: 13 }}>{wf.subscriptionName || wf.subscriptionId.slice(0, 8) + "..."}</td>
+                        <td style={s.td}><StatusBadge status={wf.state} /></td>
+                        <td style={{ ...s.td, fontSize: 12, color: C.textMute }}>
+                          {lastRunsLoading && !lr
+                            ? <span style={{ color: "#444" }}>...</span>
+                            : lastRunTime
+                              ? <span title={format(new Date(lastRunTime), "PPpp")}>
+                                  {formatDistanceToNow(new Date(lastRunTime), { addSuffix: true })}
+                                </span>
+                              : <span style={{ color: "#444" }}>No runs</span>}
+                        </td>
+                        <td style={s.td}>
+                          {lastRunsLoading && !lr
+                            ? <span style={{ color: "#444" }}>...</span>
+                            : lastRunStatus ? <StatusBadge status={lastRunStatus} /> : "-"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </>
+      )}
 
-      <ComingSoonTable title="Data Products" />
-      <ComingSoonTable title="AI Agents" />
-    </div>
-  );
-}
-
-function ComingSoonTable({ title }) {
-  return (
-    <div style={{ marginTop: 32 }}>
-      <div style={{ fontSize: 15, fontWeight: 700, color: C.textPri, marginBottom: 12 }}>{title}</div>
-      <div style={{ ...s.panel, display: "flex", alignItems: "center", justifyContent: "center", padding: "56px 0", color: C.textMute, fontSize: 15, fontStyle: "italic" }}>
-        Coming soon...
-      </div>
+      {(activeTab === "data-products" || activeTab === "ai-agents") && (
+        <div style={{ ...s.panel, display: "flex", alignItems: "center", justifyContent: "center", padding: "80px 0", color: C.textMute, fontSize: 16, fontStyle: "italic" }}>
+          Coming soon...
+        </div>
+      )}
     </div>
   );
 }
