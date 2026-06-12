@@ -57,7 +57,7 @@ export default function Layout({ children }) {
           <Link to="/" style={s.logo}>
             <img src={logo} alt="GES" style={{ height: 34, width: "auto", objectFit: "contain" }} />
             <div style={s.divider} />
-            <span style={s.logoText}>AIS Dashboard</span>
+            <span style={s.logoText}>Global Integration Command Center</span>
           </Link>
           {crumbs.length > 1 && (
             <nav style={s.breadcrumb}>
