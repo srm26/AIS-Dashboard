@@ -185,7 +185,6 @@ async def list_workflows(_: dict = Depends(get_current_user)):
             "location": item["wf"].get("location", ""),
             "state": _workflow_state(item["wf"]),
             "tags": item["wf"].get("tags", {}),
-            "_rawState": {k: item["wf"].get("properties", {}).get(k) for k in ("state", "flowState", "health")},
         }
         for item in specs
     ]
