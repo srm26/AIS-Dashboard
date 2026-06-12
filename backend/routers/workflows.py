@@ -146,16 +146,16 @@ async def _get_last_run(sub_id: str, rg: str, site_name: str, wf_name: str,
 
 @router.get("/subscriptions")
 async def list_subscriptions(_: dict = Depends(get_current_user)):
-    subs = []
-    for sub_id in settings.subscription_ids:
+    async def _fetch(sub_id: str):
         try:
             data = await get_client(sub_id).get(f"/subscriptions/{sub_id}", api_version="2022-12-01")
-            subs.append({"id": sub_id, "name": data.get("displayName", sub_id)})
+            return {"id": sub_id, "name": data.get("displayName", sub_id)}
         except Exception as e:
-            # Surface permission errors so they're visible in the UI dropdown
             msg = "⚠ Access denied" if "403" in str(e) else "⚠ Unavailable"
-            subs.append({"id": sub_id, "name": msg})
-    return {"subscriptions": subs}
+            return {"id": sub_id, "name": msg}
+
+    subs = await asyncio.gather(*[_fetch(s) for s in settings.subscription_ids])
+    return {"subscriptions": list(subs)}
 
 
 @router.get("")
