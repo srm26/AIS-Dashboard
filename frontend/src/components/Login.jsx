@@ -47,7 +47,7 @@ export default function Login() {
           <img src={logo} alt="GES" style={{ height: 32, objectFit: "contain" }} />
           <span style={{ fontWeight: 700, fontSize: 16, color: "#063c59",
             background: C.textMute, padding: "2px 8px", borderRadius: 4 }}>
-            AIS Dashboard
+            Global Integration Command Center
           </span>
         </div>
 

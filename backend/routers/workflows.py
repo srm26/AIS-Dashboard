@@ -98,19 +98,24 @@ async def _get_all_workflow_specs(force: bool = False) -> List[dict]:
 def _workflow_state(wf: dict) -> str:
     props = wf.get("properties", {})
 
-    # 1. Check embedded workflow.json definition state
+    # 1. flowState is the Standard Logic Apps runtime enabled/disabled field
+    flow_state = props.get("flowState", "")
+    if flow_state:
+        return flow_state.capitalize()
+
+    # 2. properties.state — set by ARM-level disable/enable
+    props_state = props.get("state", "")
+    if props_state:
+        return props_state.capitalize()
+
+    # 3. Fall back to embedded workflow.json definition state
     files = props.get("files") or {}
     wf_json = files.get("workflow.json") or {}
     state = wf_json.get("state", "")
     if state:
         return state.capitalize()
 
-    # 2. Check top-level properties.state (set when workflow is disabled via API)
-    props_state = props.get("state", "")
-    if props_state:
-        return props_state.capitalize()
-
-    # 3. Fall back to health — only treat Healthy as Enabled; absent health ≠ Enabled
+    # 4. Fall back to health — only treat Healthy as Enabled; absent health ≠ Enabled
     health = (props.get("health") or {}).get("state", "")
     if health == "Healthy":
         return "Enabled"
@@ -203,9 +208,18 @@ async def get_last_runs(_: dict = Depends(get_current_user)):
 
 
 @router.get("/summary")
-async def get_summary(_: dict = Depends(get_current_user)):
+async def get_summary(
+    subscription_id: Optional[str] = None,
+    site_name: Optional[str] = None,
+    _: dict = Depends(get_current_user),
+):
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     specs = await _get_all_workflow_specs()
+
+    if subscription_id:
+        specs = [s for s in specs if s["sub_id"] == subscription_id]
+    if site_name:
+        specs = [s for s in specs if s["site_name"] == site_name]
 
     total = len(specs)
     enabled = sum(1 for item in specs if _workflow_state(item["wf"]) != "Disabled")
@@ -224,16 +238,18 @@ async def get_summary(_: dict = Depends(get_current_user)):
                     if (r.get("properties") or {}).get("status") == "Failed"
                     or r.get("status") == "Failed"
                 )
-                return len(runs), failed
+                return item["id"], len(runs), failed
             except Exception:
-                return 0, 0
+                return item["id"], 0, 0
 
     run_results = await asyncio.gather(*[_fetch_today_runs(item) for item in specs])
-    today_runs = sum(c for c, _ in run_results)
-    today_failed = sum(f for _, f in run_results)
+    today_runs = sum(c for _, c, _ in run_results)
+    today_failed = sum(f for _, _, f in run_results)
+    failed_workflow_ids = [wf_id for wf_id, _, f in run_results if f > 0]
 
     return {"total": total, "enabled": enabled, "disabled": total - enabled,
-            "runsToday": today_runs, "failedToday": today_failed}
+            "runsToday": today_runs, "failedToday": today_failed,
+            "failedWorkflowIds": failed_workflow_ids}
 
 
 @router.get("/{subscription_id}/{resource_group}/{site_name}/{workflow_name}/runs")
@@ -363,6 +379,7 @@ async def disable_workflow(
         await get_client(subscription_id).post(f"{_hostruntime(subscription_id, resource_group, site_name, workflow_name)}/disable")
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
+    _wf_cache["data"] = None
     return {"status": "disabled"}
 
 
@@ -375,4 +392,5 @@ async def enable_workflow(
         await get_client(subscription_id).post(f"{_hostruntime(subscription_id, resource_group, site_name, workflow_name)}/enable")
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
+    _wf_cache["data"] = None
     return {"status": "enabled"}

@@ -27,7 +27,13 @@ export const api = {
   getSubscriptions: () => req("/workflows/subscriptions"),
   getWorkflows: () => req("/workflows"),
   getLastRuns: () => req("/workflows/last-runs"),
-  getSummary: () => req("/workflows/summary"),
+  getSummary: (subId = "", siteName = "") => {
+    const p = new URLSearchParams();
+    if (subId) p.set("subscription_id", subId);
+    if (siteName) p.set("site_name", siteName);
+    const qs = p.toString();
+    return req(`/workflows/summary${qs ? `?${qs}` : ""}`);
+  },
   getRuns: (subId, rg, site, name, top = 50) =>
     req(`/workflows/${subId}/${rg}/${site}/${name}/runs?top=${top}`),
   getActions: (subId, rg, site, name, runName) =>

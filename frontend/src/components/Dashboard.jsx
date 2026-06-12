@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { RefreshCw, Search, CheckCircle, XCircle, Activity } from "lucide-react";
 import { api } from "../api/client";
@@ -52,26 +52,40 @@ const s = {
 
 const STATE_FILTERS = ["All", "Enabled", "Disabled"];
 
+
+// Persist data across remounts so dropdowns and counts are never blank on back-navigation
+let _subsCache = [];
+let _wfCache = [];
+
+function getSavedFilters() {
+  try { return JSON.parse(sessionStorage.getItem("ais_filters") || "{}"); } catch { return {}; }
+}
+
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [workflows, setWorkflows] = useState([]);
+  const [workflows, setWorkflows] = useState(_wfCache);
   const [lastRuns, setLastRuns] = useState({});
   const [lastRunsLoading, setLastRunsLoading] = useState(true);
-  const [subscriptions, setSubscriptions] = useState([]);
+  const [subscriptions, setSubscriptions] = useState(_subsCache);
   const [summary, setSummary] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const failedWorkflowIds = useMemo(() => new Set(summary?.failedWorkflowIds || []), [summary]);
+  const [loading, setLoading] = useState(_wfCache.length === 0);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
   const [stateFilter, setStateFilter] = useState("All");
-  const [selectedSub, setSelectedSub] = useState("");
-  const [selectedSite, setSelectedSite] = useState("");
+  const [failedTodayFilter, setFailedTodayFilter] = useState(false);
+  const saved = getSavedFilters();
+  const [selectedSub, setSelectedSub] = useState(Array.isArray(saved.sub) ? saved.sub : (saved.sub ? [saved.sub] : []));
+  const [selectedSite, setSelectedSite] = useState(saved.site || "");
 
   const loadWorkflows = useCallback(async () => {
     setLoading(true); setLastRunsLoading(true); setError(null);
     try {
       const data = await api.getWorkflows();
-      setWorkflows(data.workflows || []);
+      const wfs = data.workflows || [];
+      _wfCache = wfs;
+      setWorkflows(wfs);
       if (data.errors?.length) setError(data.errors.map(e => `${e.site || e.subscriptionId}: ${e.error}`).join(" | "));
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
@@ -83,146 +97,286 @@ export default function Dashboard() {
     finally { setLastRunsLoading(false); }
   }, []);
 
-  const loadSummary = useCallback(async () => {
+  const summarySeq = useRef(0);
+  const loadSummary = useCallback(async (subIds = [], siteName = "") => {
+    const seq = ++summarySeq.current;
     setSummaryLoading(true);
-    try { setSummary(await api.getSummary()); }
-    catch {} finally { setSummaryLoading(false); }
+    try {
+      let data;
+      if (subIds.length <= 1) {
+        data = await api.getSummary(subIds[0] || "", siteName);
+      } else {
+        const results = await Promise.all(subIds.map(id => api.getSummary(id, siteName)));
+        data = {
+          runsToday: results.reduce((sum, r) => sum + (r.runsToday || 0), 0),
+          failedToday: results.reduce((sum, r) => sum + (r.failedToday || 0), 0),
+          failedWorkflowIds: results.flatMap(r => r.failedWorkflowIds || []),
+        };
+      }
+      if (seq === summarySeq.current) setSummary(data);
+    } catch {}
+    finally { if (seq === summarySeq.current) setSummaryLoading(false); }
   }, []);
 
   const loadSubscriptions = useCallback(async () => {
-    try { setSubscriptions((await api.getSubscriptions()).subscriptions || []); }
-    catch {}
+    try {
+      const subs = (await api.getSubscriptions()).subscriptions || [];
+      _subsCache = subs;
+      setSubscriptions(subs);
+    } catch {}
   }, []);
 
   useEffect(() => {
     loadWorkflows();
-    loadSummary();
     loadSubscriptions();
-  }, [loadWorkflows, loadSummary, loadSubscriptions]);
+  }, [loadWorkflows, loadSubscriptions]);
+
+  // Persist filter selections so they survive back-navigation
+  useEffect(() => {
+    sessionStorage.setItem("ais_filters", JSON.stringify({ sub: selectedSub, site: selectedSite }));
+  }, [selectedSub, selectedSite]);
+
+  // Refresh summary counts whenever subscription or site filter changes
+  useEffect(() => {
+    loadSummary(selectedSub, selectedSite);
+  }, [selectedSub, selectedSite, loadSummary]);
 
   // When subscription changes, reset site filter
   const handleSubChange = (val) => { setSelectedSub(val); setSelectedSite(""); };
 
-  // Sites available for the selected subscription (or all)
+  // Sites available for the selected subscriptions (or all)
   const availableSites = useMemo(() => {
-    const pool = selectedSub ? workflows.filter(w => w.subscriptionId === selectedSub) : workflows;
+    const pool = selectedSub.length ? workflows.filter(w => selectedSub.includes(w.subscriptionId)) : workflows;
     return [...new Set(pool.map(w => w.siteName))].sort();
   }, [workflows, selectedSub]);
 
-  const filtered = useMemo(() => workflows.filter(wf => {
+  // Total and Enabled computed locally — no extra API call needed
+  const subSiteWorkflows = useMemo(() =>
+    workflows.filter(wf =>
+      (!selectedSub.length || selectedSub.includes(wf.subscriptionId)) &&
+      (!selectedSite || wf.siteName === selectedSite)
+    ), [workflows, selectedSub, selectedSite]);
+
+  const filtered = useMemo(() => subSiteWorkflows.filter(wf => {
     const q = search.toLowerCase();
     const matchSearch = !q ||
       wf.name.toLowerCase().includes(q) ||
       wf.siteName.toLowerCase().includes(q) ||
       wf.resourceGroup.toLowerCase().includes(q);
-    const matchSub  = !selectedSub  || wf.subscriptionId === selectedSub;
-    const matchSite = !selectedSite || wf.siteName === selectedSite;
     const matchState = stateFilter === "All" || wf.state === stateFilter;
-    return matchSearch && matchSub && matchSite && matchState;
-  }), [workflows, search, selectedSub, selectedSite, stateFilter]);
+    if (!matchSearch || !matchState) return false;
+    if (failedTodayFilter) return failedWorkflowIds.has(wf.id);
+    return true;
+  }), [subSiteWorkflows, search, stateFilter, failedTodayFilter, failedWorkflowIds]);
 
-  const refresh = () => { loadWorkflows(); loadSummary(); setLastRuns({}); };
+  const refresh = () => { loadWorkflows(); loadSummary(selectedSub, selectedSite); setLastRuns({}); };
+
+  const [activeTab, setActiveTab] = useState("integrations");
+
+  const TABS = ["Integrations", "Data Products", "AI Agents"];
 
   return (
     <div>
-      <div style={s.grid}>
-        <SummaryCard label="Total Workflows"  value={summary?.total ?? "-"}       loading={summaryLoading} accent={C.blue} />
-        <SummaryCard label="Enabled"          value={summary?.enabled ?? "-"}     loading={summaryLoading} accent={C.green} />
-        <SummaryCard label="Runs Today"       value={summary?.runsToday ?? "-"}   loading={summaryLoading} accent={C.gold} />
-        <SummaryCard label="Failed Today"     value={summary?.failedToday ?? "-"} loading={summaryLoading} accent={C.orange} />
+      {/* Tab bar */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 24, borderBottom: `1px solid ${C.border}` }}>
+        {TABS.map(tab => {
+          const key = tab.toLowerCase().replace(" ", "-");
+          const active = activeTab === key;
+          return (
+            <button key={key} onClick={() => setActiveTab(key)} style={{
+              padding: "10px 24px", fontSize: 14, fontWeight: 600, cursor: "pointer",
+              background: "none", border: "none", borderBottom: active ? `2px solid ${C.blue}` : "2px solid transparent",
+              color: active ? C.blue : C.textSec, marginBottom: -1,
+            }}>
+              {tab}
+            </button>
+          );
+        })}
       </div>
 
-      {error && <div style={s.err}>{error}</div>}
+      {activeTab === "integrations" && (
+        <>
+          <div style={s.grid}>
+            <SummaryCard label="Total Workflows"  value={subSiteWorkflows.length}                                          loading={loading} accent={C.blue} />
+            <SummaryCard label="Enabled"          value={subSiteWorkflows.filter(w => w.state !== "Disabled").length}    loading={loading} accent={C.green} />
+            <SummaryCard label="Runs Today"       value={summary?.runsToday ?? "-"}                                      loading={summaryLoading} accent={C.gold} />
+            <SummaryCard label="Failed Today"     value={summary?.failedToday ?? "-"}                                    loading={summaryLoading} accent={C.orange}
+              active={failedTodayFilter} onClick={() => setFailedTodayFilter(v => !v)} />
+          </div>
 
-      <div style={s.toolbar}>
-        {/* Subscription dropdown */}
-        <div style={{ position: "relative" }}>
-          <select style={selectStyle} value={selectedSub} onChange={e => handleSubChange(e.target.value)}>
-            <option value="">All Subscriptions</option>
-            {subscriptions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
-        </div>
+          {error && <div style={s.err}>{error}</div>}
 
-        {/* Logic App (site) dropdown */}
-        <div style={{ position: "relative" }}>
-          <select style={{ ...selectStyle, minWidth: 220 }} value={selectedSite} onChange={e => setSelectedSite(e.target.value)}>
-            <option value="">All Logic Apps</option>
-            {availableSites.map(site => <option key={site} value={site}>{site}</option>)}
-          </select>
-        </div>
+          <div style={s.toolbar}>
+            <MultiSelectDropdown
+              options={subscriptions.map(s => ({ id: s.id, label: s.name }))}
+              selected={selectedSub}
+              onChange={handleSubChange}
+              placeholder="All Subscriptions"
+            />
+            <div style={{ position: "relative" }}>
+              <select style={{ ...selectStyle, minWidth: 220 }} value={selectedSite} onChange={e => setSelectedSite(e.target.value)}>
+                <option value="">All Logic Apps</option>
+                {availableSites.map(site => <option key={site} value={site}>{site}</option>)}
+              </select>
+            </div>
+            <div style={s.searchWrap}>
+              <Search size={14} style={s.searchIcon} />
+              <input style={s.input} placeholder="Search workflows..." value={search} onChange={e => setSearch(e.target.value)} />
+            </div>
+            {STATE_FILTERS.map(f => (
+              <button key={f} style={s.filterBtn(stateFilter === f)} onClick={() => setStateFilter(f)}>{f}</button>
+            ))}
+            <button style={s.refreshBtn} onClick={refresh}><RefreshCw size={14} /> Refresh</button>
+          </div>
 
-        {/* Search */}
-        <div style={s.searchWrap}>
-          <Search size={14} style={s.searchIcon} />
-          <input style={s.input} placeholder="Search workflows..." value={search} onChange={e => setSearch(e.target.value)} />
-        </div>
-
-        {/* State filters */}
-        {STATE_FILTERS.map(f => (
-          <button key={f} style={s.filterBtn(stateFilter === f)} onClick={() => setStateFilter(f)}>{f}</button>
-        ))}
-
-        <button style={s.refreshBtn} onClick={refresh}><RefreshCw size={14} /> Refresh</button>
-      </div>
-
-      <div style={s.panel}>
-        {loading ? (
-          <div style={s.empty}>Loading workflows...</div>
-        ) : filtered.length === 0 ? (
-          <div style={s.empty}>No workflows found.</div>
-        ) : (
-          <table style={s.table}>
-            <thead>
-              <tr>
-                {["Workflow", "Logic App", "Subscription", "State", "Last Run", "Last Run Status"].map(h => (
-                  <th key={h} style={s.th}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(wf => {
-                const lr = lastRuns[wf.id];
-                const lastRunTime = lr?.lastRunTime;
-                const lastRunStatus = lr?.lastRunStatus;
-                return (
-                  <tr key={wf.id} style={s.tr}
-                    onClick={() => navigate(`/workflow/${wf.subscriptionId}/${wf.resourceGroup}/${wf.siteName}/${wf.name}`)}
-                    onMouseEnter={e => e.currentTarget.style.background = C.hover}
-                    onMouseLeave={e => e.currentTarget.style.background = ""}
-                  >
-                    <td style={{ ...s.td, color: C.blue, fontWeight: 600 }}>{wf.name}</td>
-                    <td style={s.td}>{wf.siteName}</td>
-                    <td style={{ ...s.td, fontSize: 13 }}>{wf.subscriptionName || wf.subscriptionId.slice(0, 8) + "..."}</td>
-                    <td style={s.td}><StatusBadge status={wf.state} /></td>
-                    <td style={{ ...s.td, fontSize: 12, color: C.textMute }}>
-                      {lastRunsLoading && !lr
-                        ? <span style={{ color: "#444" }}>...</span>
-                        : lastRunTime
-                          ? <span title={format(new Date(lastRunTime), "PPpp")}>
-                              {formatDistanceToNow(new Date(lastRunTime), { addSuffix: true })}
-                            </span>
-                          : <span style={{ color: "#444" }}>No runs</span>}
-                    </td>
-                    <td style={s.td}>
-                      {lastRunsLoading && !lr
-                        ? <span style={{ color: "#444" }}>...</span>
-                        : lastRunStatus ? <StatusBadge status={lastRunStatus} /> : "-"}
-                    </td>
+          <div style={s.panel}>
+            {loading ? (
+              <div style={s.empty}>Loading workflows...</div>
+            ) : filtered.length === 0 ? (
+              <div style={s.empty}>No workflows found.</div>
+            ) : (
+              <table style={s.table}>
+                <thead>
+                  <tr>
+                    {["Workflow", "Logic App", "Subscription", "State", "Last Run", "Last Run Status"].map(h => (
+                      <th key={h} style={s.th}>{h}</th>
+                    ))}
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
+                </thead>
+                <tbody>
+                  {filtered.map(wf => {
+                    const lr = lastRuns[wf.id];
+                    const lastRunTime = lr?.lastRunTime;
+                    const lastRunStatus = lr?.lastRunStatus;
+                    return (
+                      <tr key={wf.id} style={s.tr}
+                        onClick={() => navigate(`/workflow/${wf.subscriptionId}/${wf.resourceGroup}/${wf.siteName}/${wf.name}`)}
+                        onMouseEnter={e => e.currentTarget.style.background = C.hover}
+                        onMouseLeave={e => e.currentTarget.style.background = ""}
+                      >
+                        <td style={{ ...s.td, color: C.blue, fontWeight: 600 }}>{wf.name}</td>
+                        <td style={s.td}>{wf.siteName}</td>
+                        <td style={{ ...s.td, fontSize: 13 }}>{wf.subscriptionName || wf.subscriptionId.slice(0, 8) + "..."}</td>
+                        <td style={s.td}><StatusBadge status={wf.state} /></td>
+                        <td style={{ ...s.td, fontSize: 12, color: C.textMute }}>
+                          {lastRunsLoading && !lr
+                            ? <span style={{ color: "#444" }}>...</span>
+                            : lastRunTime
+                              ? <span title={format(new Date(lastRunTime), "PPpp")}>
+                                  {formatDistanceToNow(new Date(lastRunTime), { addSuffix: true })}
+                                </span>
+                              : <span style={{ color: "#444" }}>No runs</span>}
+                        </td>
+                        <td style={s.td}>
+                          {lastRunsLoading && !lr
+                            ? <span style={{ color: "#444" }}>...</span>
+                            : lastRunStatus ? <StatusBadge status={lastRunStatus} /> : "-"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </>
+      )}
+
+      {(activeTab === "data-products" || activeTab === "ai-agents") && (
+        <div style={{ ...s.panel, display: "flex", alignItems: "center", justifyContent: "center", padding: "80px 0", color: C.textMute, fontSize: 16, fontStyle: "italic" }}>
+          Coming soon...
+        </div>
+      )}
     </div>
   );
 }
 
-function SummaryCard({ label, value, loading, accent }) {
+function MultiSelectDropdown({ options, selected, onChange, placeholder }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const filtered = options.filter(o => (o.label || "").toLowerCase().includes(search.toLowerCase()));
+  const toggle = (id) => onChange(selected.includes(id) ? selected.filter(s => s !== id) : [...selected, id]);
+  const label = selected.length === 0 ? placeholder : `${selected.length} subscription${selected.length > 1 ? "s" : ""} selected`;
+
   return (
-    <div style={{ ...s.card, borderTop: `3px solid ${accent}` }}>
-      <div style={s.cardLabel}>{label}</div>
+    <div ref={ref} style={{ position: "relative" }}>
+      <button onClick={() => setOpen(v => !v)} style={{
+        ...selectStyle, minWidth: 200, display: "flex", alignItems: "center", justifyContent: "space-between",
+        cursor: "pointer", userSelect: "none",
+      }}>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 100, minWidth: 260,
+          background: "#0a2e44", border: `1px solid ${C.border}`, borderRadius: 6,
+          boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+        }}>
+          <div style={{ padding: "8px 10px", borderBottom: `1px solid ${C.border}` }}>
+            <input
+              autoFocus
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search subscriptions..."
+              style={{ ...selectStyle, width: "100%", padding: "6px 10px", minWidth: 0, backgroundImage: "none" }}
+            />
+          </div>
+          {selected.length > 0 && (
+            <div style={{ padding: "6px 10px", borderBottom: `1px solid ${C.border}` }}>
+              <button onClick={() => onChange([])} style={{ background: "none", border: "none", color: C.blue, fontSize: 12, cursor: "pointer", padding: 0 }}>
+                Clear all ({selected.length})
+              </button>
+            </div>
+          )}
+          <div style={{ maxHeight: 220, overflowY: "auto" }}>
+            {filtered.length === 0 && search
+              ? <div style={{ padding: "12px 14px", color: C.textMute, fontSize: 13 }}>No matches</div>
+              : filtered.map(o => (
+                <label key={o.id} style={{
+                  display: "flex", alignItems: "center", gap: 10, padding: "8px 14px",
+                  cursor: "pointer", fontSize: 13, color: C.textSec,
+                  background: selected.includes(o.id) ? C.hover : "none",
+                }}>
+                  <input type="checkbox" checked={selected.includes(o.id)} onChange={() => toggle(o.id)}
+                    style={{ accentColor: C.blue, width: 14, height: 14, cursor: "pointer" }} />
+                  {o.label}
+                </label>
+              ))
+            }
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SummaryCard({ label, value, loading, accent, onClick, active }) {
+  const [hovered, setHovered] = useState(false);
+  const clickable = !!onClick;
+  return (
+    <div
+      style={{
+        ...s.card,
+        borderTop: `3px solid ${accent}`,
+        ...(clickable && { cursor: "pointer", outline: active ? `2px solid ${accent}` : "none", outlineOffset: 2 }),
+        ...(clickable && hovered && { background: C.hover }),
+      }}
+      onClick={onClick}
+      onMouseEnter={() => clickable && setHovered(true)}
+      onMouseLeave={() => clickable && setHovered(false)}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <div style={s.cardLabel}>{label}</div>
+        {active && <span style={{ fontSize: 10, color: accent, border: `1px solid ${accent}`, borderRadius: 4, padding: "1px 6px", fontWeight: 600 }}>ACTIVE</span>}
+      </div>
       <div style={{ ...s.cardValue, color: accent }}>{loading ? "..." : value}</div>
     </div>
   );
