@@ -31,3 +31,18 @@ export function getUser() {
 export function isAdmin() {
   return getUser()?.role === "admin";
 }
+
+/** On app init, pick up the sso_token query param written by /api/auth/azure-login. */
+export function handleSSORedirect() {
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get("sso_token");
+  if (token) {
+    localStorage.setItem(TOKEN_KEY, token);
+    window.history.replaceState({}, "", window.location.pathname);
+  }
+}
+
+/** Kick off the Easy Auth Azure AD login flow. */
+export function loginWithAzureAD() {
+  window.location.href = "/.auth/login/aad?post_login_redirect_uri=/api/auth/azure-login";
+}

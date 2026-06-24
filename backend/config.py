@@ -15,6 +15,12 @@ class Settings(BaseSettings):
     # Roles: admin (can resubmit/enable/disable), viewer (read-only)
     auth_secret_key: str = "change-me-to-a-random-secret"
     auth_users: str = ""  # e.g. alice:pass1:admin,bob:pass2:viewer
+    # Azure AD SSO (App Service Easy Auth)
+    azure_ad_enabled: bool = False
+    azure_ad_tenant_id: str = ""
+    azure_ad_client_id: str = ""
+    azure_ad_admin_group_id: str = ""
+    azure_ad_viewer_group_id: str = ""
 
     @property
     def subscription_ids(self) -> List[str]:

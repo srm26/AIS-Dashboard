@@ -1,8 +1,10 @@
+import base64
 import hmac
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 
@@ -70,3 +72,33 @@ def require_admin(user: dict = Depends(get_current_user)) -> dict:
             detail="Admin role required",
         )
     return user
+
+
+def resolve_azure_ad_user(request: Request) -> Optional[dict]:
+    """
+    Reads the X-MS-CLIENT-PRINCIPAL header injected by App Service Easy Auth.
+    Returns {"username": ..., "role": "admin"|"viewer"} or None if not authorized.
+    """
+    header = request.headers.get("X-MS-CLIENT-PRINCIPAL")
+    if not header:
+        return None
+
+    # Header is base64-encoded JSON; pad to a multiple of 4 for safe decoding
+    padded = header + "=" * (-len(header) % 4)
+    payload = json.loads(base64.b64decode(padded))
+    claims = payload.get("claims", [])
+
+    name = next(
+        (c["val"] for c in claims if c["typ"] in ("preferred_username", "upn", "name")),
+        "unknown",
+    )
+    groups = {c["val"] for c in claims if c["typ"] == "groups"}
+
+    if settings.azure_ad_admin_group_id and settings.azure_ad_admin_group_id in groups:
+        role = "admin"
+    elif settings.azure_ad_viewer_group_id and settings.azure_ad_viewer_group_id in groups:
+        role = "viewer"
+    else:
+        return None
+
+    return {"username": name, "role": role}

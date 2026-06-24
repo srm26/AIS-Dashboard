@@ -5,13 +5,14 @@ import WorkflowDetail from "./components/WorkflowDetail";
 import RunDetail from "./components/RunDetail";
 import Layout from "./components/Layout";
 import Login from "./components/Login";
-import { getUser } from "./auth";
+import { getUser, handleSSORedirect } from "./auth";
 
 function ProtectedRoute({ children }) {
   return getUser() ? children : <Navigate to="/login" replace />;
 }
 
 export default function App() {
+  handleSSORedirect();
   return (
     <Routes>
       <Route path="/login" element={<Login />} />

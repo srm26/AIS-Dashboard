@@ -1,7 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
-import { setToken } from "../auth";
+import { setToken, loginWithAzureAD } from "../auth";
 import logo from "../GES-logo.webp";
 
 const C = {
@@ -10,12 +10,31 @@ const C = {
   textPri: "#ffffff", textSec: "#cdd0d0", textMute: "#7dc3cd",
 };
 
+function MicrosoftIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg">
+      <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+      <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+      <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+      <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+    </svg>
+  );
+}
+
 export default function Login() {
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [azureAdEnabled, setAzureAdEnabled] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/auth/config")
+      .then(r => r.json())
+      .then(d => setAzureAdEnabled(d.azure_ad_enabled))
+      .catch(() => {});
+  }, []);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -53,7 +72,7 @@ export default function Login() {
 
         <div style={{ fontSize: 20, fontWeight: 700, color: C.textPri, marginBottom: 6 }}>Sign in</div>
         <div style={{ fontSize: 13, color: C.textMute, marginBottom: 28 }}>
-          Enter your credentials to access the dashboard.
+          {azureAdEnabled ? "Use your network account to access the dashboard." : "Enter your credentials to access the dashboard."}
         </div>
 
         {error && (
@@ -64,51 +83,65 @@ export default function Login() {
           }}>{error}</div>
         )}
 
-        <form onSubmit={submit}>
-          <label style={{ display: "block", marginBottom: 16 }}>
-            <div style={{ fontSize: 12, color: C.textMute, marginBottom: 6, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              Username
-            </div>
-            <input
-              type="text" autoComplete="username" required
-              value={username} onChange={e => setUsername(e.target.value)}
-              style={{
-                width: "100%", boxSizing: "border-box",
-                background: "#0c2536", border: `1px solid ${C.border}`,
-                borderRadius: 6, color: C.textPri,
-                padding: "9px 12px", fontSize: 14, outline: "none",
-              }}
-            />
-          </label>
-
-          <label style={{ display: "block", marginBottom: 28 }}>
-            <div style={{ fontSize: 12, color: C.textMute, marginBottom: 6, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              Password
-            </div>
-            <input
-              type="password" autoComplete="current-password" required
-              value={password} onChange={e => setPassword(e.target.value)}
-              style={{
-                width: "100%", boxSizing: "border-box",
-                background: "#0c2536", border: `1px solid ${C.border}`,
-                borderRadius: 6, color: C.textPri,
-                padding: "9px 12px", fontSize: 14, outline: "none",
-              }}
-            />
-          </label>
-
+        {azureAdEnabled ? (
           <button
-            type="submit" disabled={loading}
+            onClick={loginWithAzureAD}
             style={{
               width: "100%", padding: "10px", borderRadius: 6, border: "none",
-              background: loading ? C.border : C.blue,
-              color: "#0c2536", fontWeight: 700, fontSize: 14,
-              cursor: loading ? "not-allowed" : "pointer",
+              background: C.blue, color: "#0c2536", fontWeight: 700, fontSize: 14,
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
             }}
           >
-            {loading ? "Signing in..." : "Sign in"}
+            <MicrosoftIcon />
+            Sign in with Microsoft
           </button>
-        </form>
+        ) : (
+          <form onSubmit={submit}>
+            <label style={{ display: "block", marginBottom: 16 }}>
+              <div style={{ fontSize: 12, color: C.textMute, marginBottom: 6, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                Username
+              </div>
+              <input
+                type="text" autoComplete="username" required
+                value={username} onChange={e => setUsername(e.target.value)}
+                style={{
+                  width: "100%", boxSizing: "border-box",
+                  background: "#0c2536", border: `1px solid ${C.border}`,
+                  borderRadius: 6, color: C.textPri,
+                  padding: "9px 12px", fontSize: 14, outline: "none",
+                }}
+              />
+            </label>
+
+            <label style={{ display: "block", marginBottom: 28 }}>
+              <div style={{ fontSize: 12, color: C.textMute, marginBottom: 6, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                Password
+              </div>
+              <input
+                type="password" autoComplete="current-password" required
+                value={password} onChange={e => setPassword(e.target.value)}
+                style={{
+                  width: "100%", boxSizing: "border-box",
+                  background: "#0c2536", border: `1px solid ${C.border}`,
+                  borderRadius: 6, color: C.textPri,
+                  padding: "9px 12px", fontSize: 14, outline: "none",
+                }}
+              />
+            </label>
+
+            <button
+              type="submit" disabled={loading}
+              style={{
+                width: "100%", padding: "10px", borderRadius: 6, border: "none",
+                background: loading ? C.border : C.blue,
+                color: "#0c2536", fontWeight: 700, fontSize: 14,
+                cursor: loading ? "not-allowed" : "pointer",
+              }}
+            >
+              {loading ? "Signing in..." : "Sign in"}
+            </button>
+          </form>
+        )}
       </div>
     </div>
   );
