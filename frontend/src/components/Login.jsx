@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { loginWithAzureAD } from "../auth";
 import logo from "../GES-logo.webp";
 
@@ -8,18 +8,11 @@ const C = {
   textPri: "#ffffff", textSec: "#cdd0d0", textMute: "#7dc3cd",
 };
 
-function MicrosoftIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg">
-      <rect x="1" y="1" width="9" height="9" fill="#f25022" />
-      <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
-      <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
-      <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
-    </svg>
-  );
-}
-
 export default function Login() {
+  useEffect(() => {
+    loginWithAzureAD();
+  }, []);
+
   return (
     <div style={{
       minHeight: "100vh", background: C.bg,
@@ -39,22 +32,9 @@ export default function Login() {
           </span>
         </div>
 
-        <div style={{ fontSize: 20, fontWeight: 700, color: C.textPri, marginBottom: 6 }}>Sign in</div>
-        <div style={{ fontSize: 13, color: C.textMute, marginBottom: 28 }}>
-          Use your network account to access the dashboard.
+        <div style={{ fontSize: 13, color: C.textMute }}>
+          Redirecting to sign-in...
         </div>
-
-        <button
-          onClick={loginWithAzureAD}
-          style={{
-            width: "100%", padding: "10px", borderRadius: 6, border: "none",
-            background: C.blue, color: "#0c2536", fontWeight: 700, fontSize: 14,
-            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-          }}
-        >
-          <MicrosoftIcon />
-          Sign in with Microsoft
-        </button>
       </div>
     </div>
   );
