@@ -1,29 +1,9 @@
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
-from auth import authenticate, create_token, resolve_azure_ad_user
+from auth import create_token, resolve_azure_ad_user
 from config import settings
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
-
-
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-
-
-@router.get("/config")
-def auth_config():
-    return {"azure_ad_enabled": settings.azure_ad_enabled}
-
-
-@router.post("/login")
-async def login(body: LoginRequest):
-    user = authenticate(body.username, body.password)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    token = create_token(user["username"], user["role"])
-    return {"token": token, "username": user["username"], "role": user["role"]}
 
 
 @router.get("/azure-login")

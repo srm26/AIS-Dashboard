@@ -11,10 +11,8 @@ class Settings(BaseSettings):
     backend_host: str = "0.0.0.0"
     backend_port: int = 8000
     frontend_origin: str = "http://localhost:3000"
-    # Auth — comma-separated entries: username:password:role
-    # Roles: admin (can resubmit/enable/disable), viewer (read-only)
+    # Auth — secret used to sign JWTs issued after Azure AD SSO login
     auth_secret_key: str = "change-me-to-a-random-secret"
-    auth_users: str = ""  # e.g. alice:pass1:admin,bob:pass2:viewer
     # Azure AD SSO (App Service Easy Auth)
     azure_ad_enabled: bool = False
     azure_ad_tenant_id: str = ""

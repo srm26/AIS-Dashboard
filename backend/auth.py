@@ -1,5 +1,4 @@
 import base64
-import hmac
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -14,32 +13,6 @@ _ALGORITHM = "HS256"
 _TOKEN_EXPIRE_HOURS = 8
 
 bearer = HTTPBearer()
-
-
-def _parse_users() -> dict[str, tuple[str, str]]:
-    """Return {username: (password, role)} from AUTH_USERS config."""
-    users = {}
-    for entry in settings.auth_users.split(","):
-        entry = entry.strip()
-        if not entry:
-            continue
-        parts = entry.split(":")
-        if len(parts) != 3:
-            continue
-        username, password, role = (p.strip() for p in parts)
-        users[username] = (password, role.lower())
-    return users
-
-
-def authenticate(username: str, password: str) -> Optional[dict]:
-    users = _parse_users()
-    if username not in users:
-        return None
-    stored_password, role = users[username]
-    # compare_digest prevents timing-based username enumeration
-    if not hmac.compare_digest(stored_password, password):
-        return None
-    return {"username": username, "role": role}
 
 
 def create_token(username: str, role: str) -> str:

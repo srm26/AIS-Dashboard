@@ -22,8 +22,6 @@ async function req(path, options = {}) {
 }
 
 export const api = {
-  login: (username, password) =>
-    req("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
   getSubscriptions: () => req("/workflows/subscriptions"),
   getWorkflows: () => req("/workflows"),
   getLastRuns: () => req("/workflows/last-runs"),
