@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { RefreshCw, Search, CheckCircle, XCircle, Activity } from "lucide-react";
+import { RefreshCw, Search, CheckCircle, XCircle, Activity, Play } from "lucide-react";
 import { api } from "../api/client";
+import { isAdmin } from "../auth";
 import StatusBadge from "./StatusBadge";
 import { formatDistanceToNow, format } from "date-fns";
 
@@ -238,7 +239,7 @@ export default function Dashboard() {
               <table style={s.table}>
                 <thead>
                   <tr>
-                    {["Workflow", "Logic App", "Subscription", "State", "Last Run", "Last Run Status"].map(h => (
+                    {["Workflow", "Logic App", "Subscription", "State", "Last Run", "Last Run Status", ...(isAdmin() ? [""] : [])].map(h => (
                       <th key={h} style={s.th}>{h}</th>
                     ))}
                   </tr>
@@ -272,6 +273,13 @@ export default function Dashboard() {
                             ? <span style={{ color: "#444" }}>...</span>
                             : lastRunStatus ? <StatusBadge status={lastRunStatus} /> : "-"}
                         </td>
+                        {isAdmin() && (
+                          <td style={s.td} onClick={e => e.stopPropagation()}>
+                            {wf.state !== "Disabled" && (
+                              <RunButton subId={wf.subscriptionId} rg={wf.resourceGroup} site={wf.siteName} name={wf.name} />
+                            )}
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -355,6 +363,25 @@ function MultiSelectDropdown({ options, selected, onChange, placeholder }) {
         </div>
       )}
     </div>
+  );
+}
+
+function RunButton({ subId, rg, site, name }) {
+  const [loading, setLoading] = useState(false);
+  const run = async () => {
+    setLoading(true);
+    try { await api.run(subId, rg, site, name); }
+    catch (e) { alert(`Run failed: ${e.message}`); }
+    finally { setLoading(false); }
+  };
+  return (
+    <button onClick={run} disabled={loading} style={{
+      padding: "4px 12px", borderRadius: 4, border: "none",
+      cursor: "pointer", background: "#7dc3cd", color: "#0c2536", fontSize: 12, fontWeight: 600,
+      display: "flex", alignItems: "center", gap: 4,
+    }}>
+      <Play size={11} />{loading ? "..." : "Run"}
+    </button>
   );
 }
 

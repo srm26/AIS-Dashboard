@@ -44,4 +44,6 @@ export const api = {
     req(`/workflows/${subId}/${rg}/${site}/${name}/disable`, { method: "POST" }),
   enable: (subId, rg, site, name) =>
     req(`/workflows/${subId}/${rg}/${site}/${name}/enable`, { method: "POST" }),
+  run: (subId, rg, site, name) =>
+    req(`/workflows/${subId}/${rg}/${site}/${name}/run`, { method: "POST" }),
 };

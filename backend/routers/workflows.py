@@ -371,13 +371,31 @@ async def resubmit_run(
     return {"status": "resubmitted"}
 
 
+def _workflow_arm_path(sub_id: str, rg: str, site: str, workflow: str) -> str:
+    return (
+        f"/subscriptions/{sub_id}/resourceGroups/{rg}"
+        f"/providers/Microsoft.Web/sites/{site}/workflows/{workflow}"
+    )
+
+
+async def _set_workflow_state(subscription_id: str, resource_group: str, site_name: str, workflow_name: str, state: str):
+    client = get_client(subscription_id)
+    arm_path = _workflow_arm_path(subscription_id, resource_group, site_name, workflow_name)
+    wf = await client.get(arm_path)
+    files = wf.get("properties", {}).get("files", {})
+    wf_json = files.get("workflow.json", {})
+    wf_json["state"] = state
+    files["workflow.json"] = wf_json
+    await client.put(arm_path, json={"properties": {"files": files}})
+
+
 @router.post("/{subscription_id}/{resource_group}/{site_name}/{workflow_name}/disable")
 async def disable_workflow(
     subscription_id: str, resource_group: str, site_name: str, workflow_name: str,
     _: dict = Depends(require_admin),
 ):
     try:
-        await get_client(subscription_id).post(f"{_hostruntime(subscription_id, resource_group, site_name, workflow_name)}/disable")
+        await _set_workflow_state(subscription_id, resource_group, site_name, workflow_name, "Disabled")
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
     _wf_cache["data"] = None
@@ -390,8 +408,31 @@ async def enable_workflow(
     _: dict = Depends(require_admin),
 ):
     try:
-        await get_client(subscription_id).post(f"{_hostruntime(subscription_id, resource_group, site_name, workflow_name)}/enable")
+        await _set_workflow_state(subscription_id, resource_group, site_name, workflow_name, "Enabled")
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
     _wf_cache["data"] = None
     return {"status": "enabled"}
+
+
+@router.post("/{subscription_id}/{resource_group}/{site_name}/{workflow_name}/run")
+async def run_workflow(
+    subscription_id: str, resource_group: str, site_name: str, workflow_name: str,
+    _: dict = Depends(require_admin),
+):
+    client = get_client(subscription_id)
+    arm_path = _workflow_arm_path(subscription_id, resource_group, site_name, workflow_name)
+    try:
+        wf = await client.get(arm_path)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    files = wf.get("properties", {}).get("files", {})
+    definition = files.get("workflow.json", {}).get("definition", {})
+    triggers = definition.get("triggers", {})
+    trigger_name = next(iter(triggers), "manual")
+    path = f"{_hostruntime(subscription_id, resource_group, site_name, workflow_name)}/triggers/{trigger_name}/run"
+    try:
+        await client.post(path)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"status": "triggered"}

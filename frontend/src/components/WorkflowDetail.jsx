@@ -20,8 +20,8 @@ const s = {
   btn: (v) => ({
     padding: "8px 16px", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600,
     display: "flex", alignItems: "center", gap: 6, border: "none",
-    background: v === "danger" ? C.orange : v === "primary" ? C.green : C.surface,
-    color: v === "danger" ? "#fff" : v === "primary" ? "#0c2536" : C.textSec,
+    background: v === "danger" ? C.orange : v === "primary" ? C.green : v === "run" ? C.blue : C.surface,
+    color: v === "danger" ? "#fff" : v === "primary" ? "#0c2536" : v === "run" ? "#0c2536" : C.textSec,
     ...(v === "default" ? { border: `1px solid ${C.border}` } : {}),
   }),
   panel: { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden" },
@@ -49,6 +49,7 @@ export default function WorkflowDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [toggling, setToggling] = useState(false);
+  const [running, setRunning] = useState(false);
   const [workflowState, setWorkflowState] = useState(null);
   const [toast, setToast] = useState(null);
 
@@ -81,6 +82,16 @@ export default function WorkflowDetail() {
     finally { setToggling(false); }
   };
 
+  const runWorkflow = async () => {
+    setRunning(true);
+    try {
+      await api.run(subId, rg, site, name);
+      showToast("Workflow triggered.");
+      await loadRuns();
+    } catch (e) { setError(e.message); }
+    finally { setRunning(false); }
+  };
+
   return (
     <div>
       <div style={s.header}>
@@ -90,6 +101,11 @@ export default function WorkflowDetail() {
         </div>
         <div style={s.btnRow}>
           <button style={s.btn("default")} onClick={loadRuns}><RefreshCw size={14} /> Refresh</button>
+          {isAdmin() && workflowState !== "Disabled" && (
+            <button style={s.btn("run")} onClick={runWorkflow} disabled={running}>
+              <Play size={14} />{running ? "Running..." : "Run"}
+            </button>
+          )}
           {isAdmin() && (
             <button style={s.btn(workflowState === "Disabled" ? "primary" : "danger")} onClick={toggleWorkflow} disabled={toggling}>
               {workflowState === "Disabled" ? <><Play size={14} /> Enable</> : <><Pause size={14} /> Disable</>}

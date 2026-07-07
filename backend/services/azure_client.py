@@ -80,6 +80,16 @@ class AzureClient:
         )
         return resp.json() if resp.content else {}
 
+    async def put(self, path: str, json: Optional[Dict] = None, api_version: str = WEB_API_VERSION) -> Any:
+        url = f"{MGMT_BASE}{path}"
+        resp = await self._request(
+            "PUT", url,
+            headers=await self._headers(),
+            params={"api-version": api_version},
+            json=json or {},
+        )
+        return resp.json() if resp.content else {}
+
     async def paginate(self, path: str, params: Optional[Dict] = None, api_version: str = WEB_API_VERSION) -> List[Any]:
         results = []
         data = await self.get(path, params, api_version=api_version)
