@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 from datetime import datetime, timezone
 from services.azure_client import get_client, WEB_API_VERSION
+from services.metadata import load_metadata
 from config import settings
 from auth import get_current_user, require_admin
 
@@ -174,6 +175,7 @@ async def list_workflows(_: dict = Depends(get_current_user)):
         asyncio.gather(*[_fetch_sub_name(s) for s in settings.subscription_ids]),
     )
 
+    meta_store = load_metadata()
     workflows = [
         {
             "id": item["id"],
@@ -185,6 +187,7 @@ async def list_workflows(_: dict = Depends(get_current_user)):
             "location": item["wf"].get("location", ""),
             "state": _workflow_state(item["wf"]),
             "tags": item["wf"].get("tags", {}),
+            "metadata": meta_store.get(item["id"], {}),
         }
         for item in specs
     ]

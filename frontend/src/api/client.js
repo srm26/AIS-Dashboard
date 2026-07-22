@@ -21,6 +21,16 @@ async function req(path, options = {}) {
   return res.status === 204 ? null : res.json();
 }
 
+async function reqFormData(path, formData) {
+  const token = getToken();
+  const headers = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${BASE}${path}`, { method: "POST", headers, body: formData });
+  if (res.status === 401) { clearToken(); window.location.href = "/login"; throw new Error("Session expired"); }
+  if (!res.ok) { const text = await res.text(); throw new Error(text || `HTTP ${res.status}`); }
+  return res.json();
+}
+
 export const api = {
   getSubscriptions: () => req("/workflows/subscriptions"),
   getWorkflows: () => req("/workflows"),
@@ -46,4 +56,7 @@ export const api = {
     req(`/workflows/${subId}/${rg}/${site}/${name}/enable`, { method: "POST" }),
   run: (subId, rg, site, name) =>
     req(`/workflows/${subId}/${rg}/${site}/${name}/run`, { method: "POST" }),
+  getMetadata: () => req("/metadata"),
+  updateWorkflowMetadata: (data) => req("/metadata", { method: "PUT", body: JSON.stringify(data) }),
+  importMetadataCSV: (file) => { const fd = new FormData(); fd.append("file", file); return reqFormData("/metadata/import", fd); },
 };

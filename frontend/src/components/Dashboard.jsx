@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { RefreshCw, Search, CheckCircle, XCircle, Activity, Play } from "lucide-react";
+import { RefreshCw, Search, CheckCircle, XCircle, Activity, Play, Upload, Download } from "lucide-react";
 import { api } from "../api/client";
 import { isAdmin } from "../auth";
 import StatusBadge from "./StatusBadge";
@@ -160,10 +160,15 @@ export default function Dashboard() {
 
   const filtered = useMemo(() => subSiteWorkflows.filter(wf => {
     const q = search.toLowerCase();
+    const m = wf.metadata || {};
     const matchSearch = !q ||
       wf.name.toLowerCase().includes(q) ||
       wf.siteName.toLowerCase().includes(q) ||
-      wf.resourceGroup.toLowerCase().includes(q);
+      wf.resourceGroup.toLowerCase().includes(q) ||
+      (m.description || "").toLowerCase().includes(q) ||
+      (m.sme_name || "").toLowerCase().includes(q) ||
+      (m.business_owner_name || "").toLowerCase().includes(q) ||
+      (m.team || "").toLowerCase().includes(q);
     const matchState = stateFilter === "All" || wf.state === stateFilter;
     if (!matchSearch || !matchState) return false;
     if (failedTodayFilter) return failedWorkflowIds.has(wf.id);
@@ -171,6 +176,43 @@ export default function Dashboard() {
   }), [subSiteWorkflows, search, stateFilter, failedTodayFilter, failedWorkflowIds]);
 
   const refresh = () => { loadWorkflows(); loadSummary(selectedSub, selectedSite); setLastRuns({}); };
+
+  const importRef = useRef(null);
+  const [importing, setImporting] = useState(false);
+
+  const exportCSV = () => {
+    const headers = ["workflow_id", "workflow_name", "site_name", "resource_group",
+      "description", "sme_name", "sme_email", "business_owner_name", "business_owner_email",
+      "team", "criticality", "notes"];
+    const esc = (v) => `"${String(v || "").replace(/"/g, '""')}"`;
+    const rows = workflows.map(wf => {
+      const m = wf.metadata || {};
+      return [wf.id, wf.name, wf.siteName, wf.resourceGroup,
+        m.description, m.sme_name, m.sme_email, m.business_owner_name,
+        m.business_owner_email, m.team, m.criticality, m.notes].map(esc).join(",");
+    });
+    const csv = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = "workflow-metadata.csv"; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImport = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    try {
+      const result = await api.importMetadataCSV(file);
+      await loadWorkflows();
+      alert(`Imported metadata for ${result.updated} workflow(s).`);
+    } catch (err) {
+      alert(`Import failed: ${err.message}`);
+    } finally {
+      setImporting(false);
+      e.target.value = "";
+    }
+  };
 
   const [activeTab, setActiveTab] = useState("integrations");
 
@@ -228,9 +270,20 @@ export default function Dashboard() {
               <button key={f} style={s.filterBtn(stateFilter === f)} onClick={() => setStateFilter(f)}>{f}</button>
             ))}
             <button style={s.refreshBtn} onClick={refresh}><RefreshCw size={14} /> Refresh</button>
+            {isAdmin() && (
+              <>
+                <button style={s.refreshBtn} onClick={exportCSV} disabled={workflows.length === 0}>
+                  <Download size={14} /> Export CSV
+                </button>
+                <button style={s.refreshBtn} onClick={() => importRef.current?.click()} disabled={importing}>
+                  <Upload size={14} /> {importing ? "Importing..." : "Import CSV"}
+                </button>
+                <input ref={importRef} type="file" accept=".csv" style={{ display: "none" }} onChange={handleImport} />
+              </>
+            )}
           </div>
 
-          <div style={s.panel}>
+          <div style={{ ...s.panel, overflowX: "auto" }}>
             {loading ? (
               <div style={s.empty}>Loading workflows...</div>
             ) : filtered.length === 0 ? (
@@ -239,7 +292,7 @@ export default function Dashboard() {
               <table style={s.table}>
                 <thead>
                   <tr>
-                    {["Workflow", "Logic App", "Subscription", "State", "Last Run", "Last Run Status", ...(isAdmin() ? [""] : [])].map(h => (
+                    {["Workflow", "Logic App", "Subscription", "Description", "SME", "Business Owner", "Team", "Criticality", "State", "Last Run", "Last Run Status", ...(isAdmin() ? [""] : [])].map(h => (
                       <th key={h} style={s.th}>{h}</th>
                     ))}
                   </tr>
@@ -249,15 +302,25 @@ export default function Dashboard() {
                     const lr = lastRuns[wf.id];
                     const lastRunTime = lr?.lastRunTime;
                     const lastRunStatus = lr?.lastRunStatus;
+                    const m = wf.metadata || {};
                     return (
                       <tr key={wf.id} style={s.tr}
                         onClick={() => navigate(`/workflow/${wf.subscriptionId}/${wf.resourceGroup}/${wf.siteName}/${wf.name}`)}
                         onMouseEnter={e => e.currentTarget.style.background = C.hover}
                         onMouseLeave={e => e.currentTarget.style.background = ""}
                       >
-                        <td style={{ ...s.td, color: C.blue, fontWeight: 600 }}>{wf.name}</td>
-                        <td style={s.td}>{wf.siteName}</td>
-                        <td style={{ ...s.td, fontSize: 13 }}>{wf.subscriptionName || wf.subscriptionId.slice(0, 8) + "..."}</td>
+                        <td style={{ ...s.td, color: C.blue, fontWeight: 600, whiteSpace: "nowrap" }}>{wf.name}</td>
+                        <td style={{ ...s.td, whiteSpace: "nowrap" }}>{wf.siteName}</td>
+                        <td style={{ ...s.td, fontSize: 13, whiteSpace: "nowrap" }}>{wf.subscriptionName || wf.subscriptionId.slice(0, 8) + "..."}</td>
+                        <td style={{ ...s.td, fontSize: 12, maxWidth: 220 }}>
+                          {m.description
+                            ? <span title={m.description} style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.description}</span>
+                            : <span style={{ color: "#444" }}>—</span>}
+                        </td>
+                        <td style={{ ...s.td, fontSize: 12, whiteSpace: "nowrap" }}>{m.sme_name || <span style={{ color: "#444" }}>—</span>}</td>
+                        <td style={{ ...s.td, fontSize: 12, whiteSpace: "nowrap" }}>{m.business_owner_name || <span style={{ color: "#444" }}>—</span>}</td>
+                        <td style={{ ...s.td, fontSize: 12, whiteSpace: "nowrap" }}>{m.team || <span style={{ color: "#444" }}>—</span>}</td>
+                        <td style={s.td}><CriticalityBadge value={m.criticality} /></td>
                         <td style={s.td}><StatusBadge status={wf.state} /></td>
                         <td style={{ ...s.td, fontSize: 12, color: C.textMute }}>
                           {lastRunsLoading && !lr
@@ -382,6 +445,23 @@ function RunButton({ subId, rg, site, name }) {
     }}>
       <Play size={11} />{loading ? "..." : "Run"}
     </button>
+  );
+}
+
+function CriticalityBadge({ value }) {
+  if (!value) return <span style={{ color: "#444", fontSize: 12 }}>—</span>;
+  const styles = {
+    Low:      { background: "#0a3a1a", color: "#4ade80" },
+    Medium:   { background: "#2d2000", color: "#fbbf24" },
+    High:     { background: "#2c1200", color: "#fb923c" },
+    Critical: { background: "#2c0808", color: "#f87171" },
+  };
+  const st = styles[value] || { background: C.surface, color: C.textSec };
+  return (
+    <span style={{
+      display: "inline-block", fontSize: 11, fontWeight: 700, padding: "2px 8px",
+      borderRadius: 999, letterSpacing: "0.04em", textTransform: "uppercase", ...st,
+    }}>{value}</span>
   );
 }
 
