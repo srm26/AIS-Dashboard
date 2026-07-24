@@ -57,18 +57,31 @@ export default function WorkflowDetail() {
   const [metaForm, setMetaForm] = useState({});
   const [savingMeta, setSavingMeta] = useState(false);
 
+  const todayStr = () => new Date().toISOString().slice(0, 10);
+  const daysAgoStr = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
+  const [startDate, setStartDate] = useState(() => daysAgoStr(7));
+  const [endDate, setEndDate] = useState(() => todayStr());
+  const [pendingStart, setPendingStart] = useState(() => daysAgoStr(7));
+  const [pendingEnd, setPendingEnd] = useState(() => todayStr());
+
   const workflowId = `/subscriptions/${subId}/resourceGroups/${rg}/providers/Microsoft.Web/sites/${site}/workflows/${name}`;
 
-  const loadRuns = useCallback(async () => {
+  const loadRuns = useCallback(async (sd, ed) => {
     setLoading(true); setError(null);
     try {
-      const data = await api.getRuns(subId, rg, site, name);
+      const data = await api.getRuns(subId, rg, site, name, sd, ed);
       setRuns(data.runs || []);
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
   }, [subId, rg, site, name]);
 
-  useEffect(() => { loadRuns(); }, [loadRuns]);
+  useEffect(() => { loadRuns(startDate, endDate); }, [loadRuns]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const applyFilter = () => {
+    setStartDate(pendingStart);
+    setEndDate(pendingEnd);
+    loadRuns(pendingStart, pendingEnd);
+  };
 
   useEffect(() => {
     api.getMetadata().then(data => {
@@ -112,7 +125,7 @@ export default function WorkflowDetail() {
     try {
       await api.run(subId, rg, site, name);
       showToast("Workflow triggered.");
-      await loadRuns();
+      await loadRuns(startDate, endDate);
     } catch (e) { setError(e.message); }
     finally { setRunning(false); }
   };
@@ -125,7 +138,7 @@ export default function WorkflowDetail() {
           <div style={s.meta}>{site} &nbsp;/&nbsp; {rg}</div>
         </div>
         <div style={s.btnRow}>
-          <button style={s.btn("default")} onClick={loadRuns}><RefreshCw size={14} /> Refresh</button>
+          <button style={s.btn("default")} onClick={() => loadRuns(startDate, endDate)}><RefreshCw size={14} /> Refresh</button>
           {isAdmin() && workflowState !== "Disabled" && (
             <button style={s.btn("run")} onClick={runWorkflow} disabled={running}>
               <Play size={14} />{running ? "Running..." : "Run"}
@@ -150,11 +163,42 @@ export default function WorkflowDetail() {
         onChange={(k, v) => setMetaForm(f => ({ ...f, [k]: v }))}
       />
 
+      <div style={{
+        display: "flex", alignItems: "center", gap: 12, marginBottom: 12,
+        background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 16px",
+      }}>
+        <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: C.textMute, whiteSpace: "nowrap" }}>
+          Date Range
+        </span>
+        <input
+          type="date" value={pendingStart} max={pendingEnd}
+          onChange={e => setPendingStart(e.target.value)}
+          style={{ background: "#042d44", border: `1px solid ${C.border}`, borderRadius: 4, color: C.textPri, padding: "5px 8px", fontSize: 12, outline: "none", colorScheme: "dark" }}
+        />
+        <span style={{ color: C.textMute, fontSize: 12 }}>to</span>
+        <input
+          type="date" value={pendingEnd} min={pendingStart}
+          onChange={e => setPendingEnd(e.target.value)}
+          style={{ background: "#042d44", border: `1px solid ${C.border}`, borderRadius: 4, color: C.textPri, padding: "5px 8px", fontSize: 12, outline: "none", colorScheme: "dark" }}
+        />
+        <button onClick={applyFilter} disabled={loading} style={{
+          padding: "5px 16px", borderRadius: 4, border: "none", background: C.blue,
+          color: "#0c2536", fontSize: 12, fontWeight: 600, cursor: "pointer",
+        }}>
+          Apply
+        </button>
+        {!loading && (
+          <span style={{ marginLeft: "auto", fontSize: 12, color: C.textMute }}>
+            {runs.length} run{runs.length !== 1 ? "s" : ""}
+          </span>
+        )}
+      </div>
+
       <div style={s.panel}>
         {loading ? (
           <div style={s.empty}>Loading runs...</div>
         ) : runs.length === 0 ? (
-          <div style={s.empty}>No runs found.</div>
+          <div style={s.empty}>No runs found for this date range.</div>
         ) : (
           <table style={s.table}>
             <thead>

@@ -42,8 +42,12 @@ export const api = {
     const qs = p.toString();
     return req(`/workflows/summary${qs ? `?${qs}` : ""}`);
   },
-  getRuns: (subId, rg, site, name, top = 50) =>
-    req(`/workflows/${subId}/${rg}/${site}/${name}/runs?top=${top}`),
+  getRuns: (subId, rg, site, name, startTime, endTime) => {
+    const p = new URLSearchParams({ top: "250" });
+    if (startTime) p.set("start_time", startTime);
+    if (endTime) p.set("end_time", endTime);
+    return req(`/workflows/${subId}/${rg}/${site}/${name}/runs?${p}`);
+  },
   getActions: (subId, rg, site, name, runName) =>
     req(`/workflows/${subId}/${rg}/${site}/${name}/runs/${runName}/actions`),
   getPayload: (subId, rg, site, name, runName, actionName) =>

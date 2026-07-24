@@ -258,13 +258,31 @@ async def get_summary(
 @router.get("/{subscription_id}/{resource_group}/{site_name}/{workflow_name}/runs")
 async def list_runs(
     subscription_id: str, resource_group: str, site_name: str, workflow_name: str,
-    top: int = Query(50, le=250),
+    top: int = Query(250, le=500),
+    start_time: Optional[str] = Query(None),  # YYYY-MM-DD
+    end_time: Optional[str] = Query(None),    # YYYY-MM-DD
     _: dict = Depends(get_current_user),
 ):
     path = f"{_hostruntime(subscription_id, resource_group, site_name, workflow_name)}/runs"
+    params = {}
+    filters = []
+    if start_time:
+        filters.append(f"startTime ge {start_time}T00:00:00Z")
+    if end_time:
+        filters.append(f"startTime le {end_time}T23:59:59Z")
+    if filters:
+        params["$filter"] = " and ".join(filters)
+
     try:
-        data = await get_client(subscription_id).get(path)
-        runs = data.get("value", [])[:top]
+        client = get_client(subscription_id)
+        if filters:
+            params["$top"] = 250  # max page size; paginate collects all pages
+            runs = await client.paginate(path, params=params)
+            runs = runs[:top]
+        else:
+            params["$top"] = top
+            data = await client.get(path, params=params)
+            runs = data.get("value", [])
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
