@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { RefreshCw, Play, Pause } from "lucide-react";
+import { RefreshCw, Play, Pause, Pencil, X, Check } from "lucide-react";
 import { api } from "../api/client";
 import { isAdmin } from "../auth";
 import StatusBadge from "./StatusBadge";
@@ -52,19 +52,57 @@ export default function WorkflowDetail() {
   const [running, setRunning] = useState(false);
   const [workflowState, setWorkflowState] = useState(null);
   const [toast, setToast] = useState(null);
+  const [metadata, setMetadata] = useState({});
+  const [editingMeta, setEditingMeta] = useState(false);
+  const [metaForm, setMetaForm] = useState({});
+  const [savingMeta, setSavingMeta] = useState(false);
 
-  const loadRuns = useCallback(async () => {
+  const todayStr = () => new Date().toISOString().slice(0, 10);
+  const daysAgoStr = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
+  const [startDate, setStartDate] = useState(() => daysAgoStr(7));
+  const [endDate, setEndDate] = useState(() => todayStr());
+  const [pendingStart, setPendingStart] = useState(() => daysAgoStr(7));
+  const [pendingEnd, setPendingEnd] = useState(() => todayStr());
+
+  const workflowId = `/subscriptions/${subId}/resourceGroups/${rg}/providers/Microsoft.Web/sites/${site}/workflows/${name}`;
+
+  const loadRuns = useCallback(async (sd, ed) => {
     setLoading(true); setError(null);
     try {
-      const data = await api.getRuns(subId, rg, site, name);
+      const data = await api.getRuns(subId, rg, site, name, sd, ed);
       setRuns(data.runs || []);
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
   }, [subId, rg, site, name]);
 
-  useEffect(() => { loadRuns(); }, [loadRuns]);
+  useEffect(() => { loadRuns(startDate, endDate); }, [loadRuns]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const applyFilter = () => {
+    setStartDate(pendingStart);
+    setEndDate(pendingEnd);
+    loadRuns(pendingStart, pendingEnd);
+  };
+
+  useEffect(() => {
+    api.getMetadata().then(data => {
+      const m = (data.metadata || {})[workflowId] || {};
+      setMetadata(m);
+      setMetaForm(m);
+    }).catch(() => {});
+  }, [workflowId]);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
+
+  const saveMeta = async () => {
+    setSavingMeta(true);
+    try {
+      await api.updateWorkflowMetadata({ workflow_id: workflowId, ...metaForm });
+      setMetadata({ ...metaForm });
+      setEditingMeta(false);
+      showToast("Metadata saved.");
+    } catch (e) { showToast(`Save failed: ${e.message}`); }
+    finally { setSavingMeta(false); }
+  };
 
   const toggleWorkflow = async () => {
     setToggling(true);
@@ -87,7 +125,7 @@ export default function WorkflowDetail() {
     try {
       await api.run(subId, rg, site, name);
       showToast("Workflow triggered.");
-      await loadRuns();
+      await loadRuns(startDate, endDate);
     } catch (e) { setError(e.message); }
     finally { setRunning(false); }
   };
@@ -100,7 +138,7 @@ export default function WorkflowDetail() {
           <div style={s.meta}>{site} &nbsp;/&nbsp; {rg}</div>
         </div>
         <div style={s.btnRow}>
-          <button style={s.btn("default")} onClick={loadRuns}><RefreshCw size={14} /> Refresh</button>
+          <button style={s.btn("default")} onClick={() => loadRuns(startDate, endDate)}><RefreshCw size={14} /> Refresh</button>
           {isAdmin() && workflowState !== "Disabled" && (
             <button style={s.btn("run")} onClick={runWorkflow} disabled={running}>
               <Play size={14} />{running ? "Running..." : "Run"}
@@ -116,11 +154,51 @@ export default function WorkflowDetail() {
 
       {error && <div style={s.err}>{error}</div>}
 
+      <MetadataPanel
+        metadata={metadata} editing={editingMeta} form={metaForm}
+        saving={savingMeta}
+        onEdit={() => { setMetaForm({ ...metadata }); setEditingMeta(true); }}
+        onCancel={() => setEditingMeta(false)}
+        onSave={saveMeta}
+        onChange={(k, v) => setMetaForm(f => ({ ...f, [k]: v }))}
+      />
+
+      <div style={{
+        display: "flex", alignItems: "center", gap: 12, marginBottom: 12,
+        background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 16px",
+      }}>
+        <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: C.textMute, whiteSpace: "nowrap" }}>
+          Date Range
+        </span>
+        <input
+          type="date" value={pendingStart} max={pendingEnd}
+          onChange={e => setPendingStart(e.target.value)}
+          style={{ background: "#042d44", border: `1px solid ${C.border}`, borderRadius: 4, color: C.textPri, padding: "5px 8px", fontSize: 12, outline: "none", colorScheme: "dark" }}
+        />
+        <span style={{ color: C.textMute, fontSize: 12 }}>to</span>
+        <input
+          type="date" value={pendingEnd} min={pendingStart}
+          onChange={e => setPendingEnd(e.target.value)}
+          style={{ background: "#042d44", border: `1px solid ${C.border}`, borderRadius: 4, color: C.textPri, padding: "5px 8px", fontSize: 12, outline: "none", colorScheme: "dark" }}
+        />
+        <button onClick={applyFilter} disabled={loading} style={{
+          padding: "5px 16px", borderRadius: 4, border: "none", background: C.blue,
+          color: "#0c2536", fontSize: 12, fontWeight: 600, cursor: "pointer",
+        }}>
+          Apply
+        </button>
+        {!loading && (
+          <span style={{ marginLeft: "auto", fontSize: 12, color: C.textMute }}>
+            {runs.length} run{runs.length !== 1 ? "s" : ""}
+          </span>
+        )}
+      </div>
+
       <div style={s.panel}>
         {loading ? (
           <div style={s.empty}>Loading runs...</div>
         ) : runs.length === 0 ? (
-          <div style={s.empty}>No runs found.</div>
+          <div style={s.empty}>No runs found for this date range.</div>
         ) : (
           <table style={s.table}>
             <thead>
@@ -151,6 +229,144 @@ export default function WorkflowDetail() {
       </div>
 
       {toast && <div style={s.toast}>{toast}</div>}
+    </div>
+  );
+}
+
+const CRITICALITY_OPTS = ["", "Low", "Medium", "High", "Critical"];
+
+function CriticalityBadge({ value }) {
+  if (!value) return <span style={{ color: "#444", fontSize: 12 }}>—</span>;
+  const styles = {
+    Low:      { background: "#0a3a1a", color: "#4ade80" },
+    Medium:   { background: "#2d2000", color: "#fbbf24" },
+    High:     { background: "#2c1200", color: "#fb923c" },
+    Critical: { background: "#2c0808", color: "#f87171" },
+  };
+  const st = styles[value] || { background: C.surface, color: C.textSec };
+  return (
+    <span style={{
+      display: "inline-block", fontSize: 11, fontWeight: 700, padding: "3px 10px",
+      borderRadius: 999, letterSpacing: "0.04em", textTransform: "uppercase", ...st,
+    }}>{value}</span>
+  );
+}
+
+function MetadataPanel({ metadata: m, editing, form, saving, onEdit, onCancel, onSave, onChange }) {
+  const inp = (key, placeholder = "") => (
+    <input
+      value={form[key] || ""}
+      onChange={e => onChange(key, e.target.value)}
+      placeholder={placeholder}
+      style={{
+        width: "100%", background: "#042d44", border: `1px solid ${C.border}`, borderRadius: 4,
+        color: C.textPri, padding: "5px 8px", fontSize: 12, outline: "none",
+      }}
+    />
+  );
+
+  const label = (text) => (
+    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: C.textMute, marginBottom: 3 }}>
+      {text}
+    </div>
+  );
+
+  const val = (text, isEmail) => {
+    if (!text) return <span style={{ color: "#444", fontSize: 12 }}>—</span>;
+    if (isEmail) return <a href={`mailto:${text}`} style={{ color: C.blue, fontSize: 12 }} onClick={e => e.stopPropagation()}>{text}</a>;
+    return <span style={{ color: C.textSec, fontSize: 13 }}>{text}</span>;
+  };
+
+  return (
+    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "16px 20px", marginBottom: 20 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: C.textMute }}>
+          Integration Metadata
+        </span>
+        {isAdmin() && !editing && (
+          <button onClick={onEdit} style={{
+            display: "flex", alignItems: "center", gap: 5, padding: "4px 12px", borderRadius: 4,
+            border: `1px solid ${C.border}`, background: "transparent", color: C.textSec,
+            fontSize: 12, cursor: "pointer",
+          }}>
+            <Pencil size={11} /> Edit
+          </button>
+        )}
+        {isAdmin() && editing && (
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={onCancel} style={{
+              display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 4,
+              border: `1px solid ${C.border}`, background: "transparent", color: C.textSec, fontSize: 12, cursor: "pointer",
+            }}>
+              <X size={11} /> Cancel
+            </button>
+            <button onClick={onSave} disabled={saving} style={{
+              display: "flex", alignItems: "center", gap: 4, padding: "4px 12px", borderRadius: 4,
+              border: "none", background: C.green, color: "#0c2536", fontSize: 12, fontWeight: 600, cursor: "pointer",
+            }}>
+              <Check size={11} /> {saving ? "Saving..." : "Save"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Description — full width */}
+      <div style={{ marginBottom: 14 }}>
+        {label("Description")}
+        {editing ? inp("description", "What does this integration do?") : val(m.description)}
+      </div>
+
+      {/* 2-column grid for the rest */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 32px" }}>
+        <div>
+          {label("Subject Matter Expert")}
+          {editing ? inp("sme_name", "Name") : val(m.sme_name)}
+          {editing
+            ? <div style={{ marginTop: 4 }}>{inp("sme_email", "Email")}</div>
+            : val(m.sme_email, true)}
+        </div>
+        <div>
+          {label("Business Owner")}
+          {editing ? inp("business_owner_name", "Name") : val(m.business_owner_name)}
+          {editing
+            ? <div style={{ marginTop: 4 }}>{inp("business_owner_email", "Email")}</div>
+            : val(m.business_owner_email, true)}
+        </div>
+        <div>
+          {label("Team / Department")}
+          {editing ? inp("team", "e.g. Revenue Operations") : val(m.team)}
+        </div>
+        <div>
+          {label("Criticality")}
+          {editing ? (
+            <select
+              value={form.criticality || ""}
+              onChange={e => onChange("criticality", e.target.value)}
+              style={{
+                background: "#042d44", border: `1px solid ${C.border}`, borderRadius: 4,
+                color: C.textPri, padding: "5px 8px", fontSize: 12, outline: "none", cursor: "pointer",
+              }}
+            >
+              {CRITICALITY_OPTS.map(o => <option key={o} value={o}>{o || "— Select —"}</option>)}
+            </select>
+          ) : <CriticalityBadge value={m.criticality} />}
+        </div>
+        <div style={{ gridColumn: "1 / -1" }}>
+          {label("Notes")}
+          {editing ? (
+            <textarea
+              value={form.notes || ""}
+              onChange={e => onChange("notes", e.target.value)}
+              placeholder="IT notes, schedule info, downstream systems..."
+              rows={2}
+              style={{
+                width: "100%", background: "#042d44", border: `1px solid ${C.border}`, borderRadius: 4,
+                color: C.textPri, padding: "5px 8px", fontSize: 12, outline: "none", resize: "vertical",
+              }}
+            />
+          ) : val(m.notes)}
+        </div>
+      </div>
     </div>
   );
 }
