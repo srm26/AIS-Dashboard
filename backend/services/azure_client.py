@@ -91,7 +91,11 @@ class AzureClient:
         return resp.json() if resp.content else {}
 
     async def resource_graph(self, query: str, subscriptions: List[str]) -> List[Dict]:
-        """Cross-subscription Resource Graph query, normalises columns/rows to dicts."""
+        """Cross-subscription Resource Graph query, normalises response to a list of dicts.
+
+        API version 2021-03-01 returns data as a list of objects directly.
+        Older versions return {columns: [...], rows: [...]} which we also handle.
+        """
         all_rows: List[Dict] = []
         skip_token: Optional[str] = None
         while True:
@@ -105,12 +109,18 @@ class AzureClient:
                 params={"api-version": "2021-03-01"},
                 json=body,
             )
-            payload = resp.json().get("data", {})
-            col_names = [c["name"] for c in payload.get("columns", [])]
-            for row in payload.get("rows", []):
-                all_rows.append(dict(zip(col_names, row)))
-            skip_token = resp.json().get("$skipToken")
-            if not skip_token or not payload.get("rows"):
+            result = resp.json()
+            data = result.get("data", [])
+            if isinstance(data, list):
+                # 2021-03-01+: data is already a list of dicts
+                all_rows.extend(data)
+            elif isinstance(data, dict):
+                # Older format: data = {columns: [...], rows: [...]}
+                col_names = [c["name"] for c in data.get("columns", [])]
+                for row in data.get("rows", []):
+                    all_rows.append(dict(zip(col_names, row)))
+            skip_token = result.get("$skipToken")
+            if not skip_token or not data:
                 break
         return all_rows
 

@@ -147,9 +147,9 @@ async def _get_ai_app_id(sub_id: str, rg: str, app_name: str) -> Optional[str]:
 
 
 async def _find_app_id_by_sampling(sub_id: str, rg: str, app_name: str) -> Optional[str]:
-    """Probe App Insights components with a test query to find which one has telemetry
-    for this function app. Searches subscription-wide (not just same RG) across all
-    configured subscriptions. Used when app settings are unreadable and no hidden-link tag.
+    """Probe App Insights components with a test query to find which has telemetry
+    for this function app. Uses Resource Graph first (works even when direct ARM
+    calls return 400), then falls back to ARM per-subscription enumeration.
     """
     kql = (
         "requests"
@@ -158,6 +158,22 @@ async def _find_app_id_by_sampling(sub_id: str, rg: str, app_name: str) -> Optio
         " | take 1"
         " | project timestamp"
     )
+    candidates: List[str] = []
+
+    # Resource Graph covers all subscriptions in one call, including those
+    # where direct microsoft.insights/components ARM calls are blocked.
+    try:
+        rows = await get_client(sub_id).resource_graph(
+            "Resources"
+            " | where type == 'microsoft.insights/components'"
+            " | project appId=tostring(properties.AppId)",
+            subscriptions=settings.subscription_ids,
+        )
+        candidates = [r.get("appId") for r in rows if r.get("appId")]
+    except Exception:
+        pass
+
+    # ARM per-subscription fallback for any gap in Resource Graph coverage
     subs = [sub_id] + [s for s in settings.subscription_ids if s != sub_id]
     for search_sub in subs:
         try:
@@ -165,18 +181,20 @@ async def _find_app_id_by_sampling(sub_id: str, rg: str, app_name: str) -> Optio
                 f"/subscriptions/{search_sub}/providers/microsoft.insights/components",
                 api_version="2020-02-02",
             )
+            for comp in components:
+                app_id = (comp.get("properties") or {}).get("AppId")
+                if app_id and app_id not in candidates:
+                    candidates.append(app_id)
         except Exception:
             continue
-        for comp in components:
-            comp_app_id = (comp.get("properties") or {}).get("AppId")
-            if not comp_app_id:
-                continue
-            try:
-                rows = await get_ai_client().query(comp_app_id, kql)
-                if rows:
-                    return comp_app_id
-            except Exception:
-                continue
+
+    for comp_app_id in candidates:
+        try:
+            rows = await get_ai_client().query(comp_app_id, kql)
+            if rows:
+                return comp_app_id
+        except Exception:
+            continue
     return None
 
 
