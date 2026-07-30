@@ -496,13 +496,12 @@ export default function Dashboard() {
                   <tbody>
                     {fnFiltered.map(app => {
                       const lr = functionLastRuns[app.id];
-                      const sub = subscriptions.find(s => s.id === app.subscriptionId);
                       return (
                         <FnAppRow
                           key={app.id}
                           app={app}
                           lr={lr}
-                          subName={sub?.name || app.subscriptionId.slice(0, 8) + "..."}
+                          subName={app.subscriptionName || app.subscriptionId.slice(0, 8) + "..."}
                           fnLastRunsLoading={fnLastRunsLoading}
                         />
                       );
