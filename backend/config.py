@@ -1,10 +1,15 @@
+import json
 from pydantic_settings import BaseSettings
-from typing import List
+from typing import Dict, List
 
 
 class Settings(BaseSettings):
     azure_subscription_ids: str  # comma-separated
     azure_resource_groups: str = ""  # comma-separated, empty = all
+    # Optional: JSON map of function app name → App Insights App ID, for apps
+    # where automatic detection fails (e.g. SP lacks config/appsettings/list).
+    # Example: {"fa-wus2-filemover-dv-01":"abc123-...", "fa-other":"def456-..."}
+    azure_function_ai_overrides: str = "{}"
     # Optional: client ID of a user-assigned managed identity.
     # Leave unset to use the system-assigned managed identity.
     azure_managed_identity_client_id: str = ""
@@ -19,6 +24,13 @@ class Settings(BaseSettings):
     azure_ad_client_id: str = ""
     azure_ad_admin_group_id: str = ""
     azure_ad_viewer_group_id: str = ""
+
+    @property
+    def function_ai_overrides(self) -> Dict[str, str]:
+        try:
+            return json.loads(self.azure_function_ai_overrides)
+        except Exception:
+            return {}
 
     @property
     def subscription_ids(self) -> List[str]:

@@ -74,6 +74,12 @@ async def _get_ai_app_id(sub_id: str, rg: str, app_name: str) -> Optional[str]:
     if entry and now - entry["ts"] < _AI_CONFIG_TTL:
         return entry["app_id"]
 
+    # Manual override takes precedence — used when auto-detection can't work
+    override = settings.function_ai_overrides.get(app_name)
+    if override:
+        _ai_config_cache[cache_key] = {"app_id": override, "ts": now}
+        return override
+
     site_resource_id = (
         f"/subscriptions/{sub_id}/resourceGroups/{rg}"
         f"/providers/Microsoft.Web/sites/{app_name}"
