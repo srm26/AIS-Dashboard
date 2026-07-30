@@ -528,7 +528,7 @@ async def list_functions_in_app(
         rows = await get_ai_client().query(app_id, kql)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
-    return {"functions": rows}
+    return {"functions": rows, "appId": app_id, "roleName": role_name}
 
 
 @router.get("/{subscription_id}/{resource_group}/{app_name}/run/{operation_id}")

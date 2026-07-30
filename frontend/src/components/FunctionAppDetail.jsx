@@ -47,6 +47,7 @@ export default function FunctionAppDetail() {
   const { subId, rg, appName } = useParams();
   const navigate = useNavigate();
   const [functions, setFunctions] = useState([]);
+  const [meta, setMeta] = useState(null); // {appId, roleName}
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -55,6 +56,7 @@ export default function FunctionAppDetail() {
     try {
       const data = await api.getFunctionsInApp(subId, rg, appName);
       setFunctions(data.functions || []);
+      if (data.appId) setMeta({ appId: data.appId, roleName: data.roleName });
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
   }, [subId, rg, appName]);
@@ -82,7 +84,25 @@ export default function FunctionAppDetail() {
         {loading ? (
           <div style={s.empty}>Loading functions…</div>
         ) : functions.length === 0 ? (
-          <div style={s.empty}>No functions found in the last 30 days.</div>
+          <div style={s.empty}>
+            <div>No functions found in the last 30 days.</div>
+            {meta && (
+              <div style={{ fontSize: 11, marginTop: 12, color: C.textMute, fontFamily: "monospace" }}>
+                <div>App Insights: {meta.appId}</div>
+                <div>cloud_RoleName filter: {meta.roleName}</div>
+                {meta.roleName !== appName && (
+                  <div style={{ marginTop: 4, color: C.gold }}>
+                    Role name differs from app name — set via AZURE_FUNCTION_ROLE_OVERRIDES
+                  </div>
+                )}
+                {meta.roleName === appName && (
+                  <div style={{ marginTop: 4 }}>
+                    If the app has runs, check the portal: Logs → requests | where cloud_RoleName =~ &apos;{meta.roleName}&apos;
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         ) : (
           <table style={s.table}>
             <thead>
