@@ -113,13 +113,25 @@ async def _get_all_function_apps(force: bool = False) -> List[dict]:
     if not force and _fn_cache["data"] is not None and now - _fn_cache["ts"] < _CACHE_TTL:
         return _fn_cache["data"]
 
+    sub_names: dict = {}
+
+    async def _fetch_sub_name(sub_id: str):
+        try:
+            data = await get_client(sub_id).get(f"/subscriptions/{sub_id}", api_version="2022-12-01")
+            sub_names[sub_id] = data.get("displayName", sub_id)
+        except Exception:
+            sub_names[sub_id] = sub_id
+
     async def _fetch(sub_id: str):
         try:
             return sub_id, await _list_function_apps_for_sub(sub_id)
         except Exception:
             return sub_id, []
 
-    sub_results = await asyncio.gather(*[_fetch(s) for s in settings.subscription_ids])
+    sub_results, _ = await asyncio.gather(
+        asyncio.gather(*[_fetch(s) for s in settings.subscription_ids]),
+        asyncio.gather(*[_fetch_sub_name(s) for s in settings.subscription_ids]),
+    )
 
     apps = []
     for sub_id, site_list in sub_results:
@@ -136,6 +148,7 @@ async def _get_all_function_apps(force: bool = False) -> List[dict]:
                 "name": site["name"],
                 "resourceGroup": _parse_rg(site["id"]),
                 "subscriptionId": sub_id,
+                "subscriptionName": sub_names.get(sub_id, sub_id),
                 "location": site.get("location", ""),
                 "state": props.get("state", "Unknown"),
                 "kind": site.get("kind", ""),
