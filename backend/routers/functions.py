@@ -586,12 +586,12 @@ async def get_run_detail(
     }
 
 
-@router.get("/{subscription_id}/{resource_group}/{app_name}/{fn_name}/runs")
+@router.get("/{subscription_id}/{resource_group}/{app_name}/runs")
 async def list_fn_runs(
     subscription_id: str,
     resource_group: str,
     app_name: str = Path(..., pattern=r"^[a-zA-Z0-9_-]{1,60}$"),
-    fn_name: str = Path(..., pattern=r"^[a-zA-Z0-9_-]{1,80}$"),
+    fn: str = Query(..., description="Function name to filter by"),
     days: int = Query(7, ge=1, le=30),
     top: int = Query(100, ge=1, le=500),
     _: dict = Depends(get_current_user),
@@ -601,6 +601,7 @@ async def list_fn_runs(
     if not app_id:
         raise HTTPException(status_code=404, detail=f"Application Insights not configured for '{app_name}'.")
     role_name = _get_ai_role_name(app_name)
+    fn_name = fn.replace("'", "")  # sanitise for KQL string literal
     kql = (
         "requests"
         f" | where cloud_RoleName =~ '{role_name}'"

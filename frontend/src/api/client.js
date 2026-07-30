@@ -74,7 +74,7 @@ export const api = {
   getFunctionsInApp: (subId, rg, appName) =>
     req(`/functions/${subId}/${rg}/${appName}/functions`),
   getFunctionRuns: (subId, rg, appName, fnName, days = 7, top = 100) =>
-    req(`/functions/${subId}/${rg}/${appName}/${encodeURIComponent(fnName)}/runs?days=${days}&top=${top}`),
+    req(`/functions/${subId}/${rg}/${appName}/runs?fn=${encodeURIComponent(fnName)}&days=${days}&top=${top}`),
   getFunctionRunDetail: (subId, rg, appName, operationId) =>
     req(`/functions/${subId}/${rg}/${appName}/run/${encodeURIComponent(operationId)}`),
 };
