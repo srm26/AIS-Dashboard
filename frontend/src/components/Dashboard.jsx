@@ -263,18 +263,47 @@ export default function Dashboard() {
   };
 
   const [activeTab, setActiveTab] = useState("integrations");
+  const [functionApps, setFunctionApps] = useState([]);
+  const [functionLastRuns, setFunctionLastRuns] = useState({});
+  const [fnLastRunsLoading, setFnLastRunsLoading] = useState(false);
+  const [fnLoading, setFnLoading] = useState(false);
+  const [fnError, setFnError] = useState(null);
+  const [fnLoaded, setFnLoaded] = useState(false);
+  const [fnSearch, setFnSearch] = useState("");
 
-  const TABS = ["Integrations", "Data Products", "AI Agents"];
+  const loadFunctionApps = useCallback(async () => {
+    setFnLoading(true); setFnLastRunsLoading(true); setFnError(null);
+    try {
+      const data = await api.getFunctionApps();
+      setFunctionApps(data.functions || []);
+    } catch (e) { setFnError(e.message); }
+    finally { setFnLoading(false); }
+    try {
+      const runs = await api.getFunctionAppLastRuns();
+      setFunctionLastRuns(runs);
+    } catch {}
+    finally { setFnLastRunsLoading(false); }
+  }, []);
+
+  const handleTabChange = useCallback((key) => {
+    setActiveTab(key);
+    if (key === "function-apps" && !fnLoaded) {
+      setFnLoaded(true);
+      loadFunctionApps();
+    }
+  }, [fnLoaded, loadFunctionApps]);
+
+  const TABS = ["Integrations", "Function Apps", "Data Products", "AI Agents"];
 
   return (
     <div>
       {/* Tab bar */}
       <div style={{ display: "flex", gap: 4, marginBottom: 24, borderBottom: `1px solid ${C.border}` }}>
         {TABS.map(tab => {
-          const key = tab.toLowerCase().replace(" ", "-");
+          const key = tab.toLowerCase().replace(/ /g, "-");
           const active = activeTab === key;
           return (
-            <button key={key} onClick={() => setActiveTab(key)} style={{
+            <button key={key} onClick={() => handleTabChange(key)} style={{
               padding: "10px 24px", fontSize: 14, fontWeight: 600, cursor: "pointer",
               background: "none", border: "none", borderBottom: active ? `2px solid ${C.blue}` : "2px solid transparent",
               color: active ? C.blue : C.textSec, marginBottom: -1,
@@ -412,6 +441,79 @@ export default function Dashboard() {
           </div>
         </>
       )}
+
+      {activeTab === "function-apps" && (() => {
+        const fnFiltered = (selectedSub.length
+          ? functionApps.filter(a => selectedSub.includes(a.subscriptionId))
+          : functionApps
+        ).filter(a => {
+          if (!fnSearch) return true;
+          const q = fnSearch.toLowerCase();
+          return a.name.toLowerCase().includes(q) ||
+            a.resourceGroup.toLowerCase().includes(q) ||
+            (a.runtimeStack || "").toLowerCase().includes(q);
+        });
+        const fnRunning = fnFiltered.filter(a => a.state === "Running").length;
+        const fnLastOk = fnFiltered.filter(a => functionLastRuns[a.id]?.lastRunStatus === "Succeeded").length;
+        const fnLastFailed = fnFiltered.filter(a => functionLastRuns[a.id]?.lastRunStatus === "Failed").length;
+        return (
+          <>
+            <div style={s.grid}>
+              <SummaryCard label="Total Apps"     value={fnFiltered.length} loading={fnLoading} accent={C.blue} />
+              <SummaryCard label="Running"        value={fnRunning}         loading={fnLoading} accent={C.green} />
+              <SummaryCard label="Last Run OK"    value={fnLastOk}          loading={fnLastRunsLoading} accent={C.gold} />
+              <SummaryCard label="Last Run Failed" value={fnLastFailed}     loading={fnLastRunsLoading} accent={C.orange} />
+            </div>
+            {fnError && <div style={s.err}>{fnError}</div>}
+            <div style={s.toolbar}>
+              <MultiSelectDropdown
+                options={subscriptions.map(s => ({ id: s.id, label: s.name }))}
+                selected={selectedSub}
+                onChange={handleSubChange}
+                placeholder="All Subscriptions"
+              />
+              <div style={s.searchWrap}>
+                <Search size={14} style={s.searchIcon} />
+                <input style={s.input} placeholder="Search function apps..." value={fnSearch}
+                  onChange={e => setFnSearch(e.target.value)} />
+              </div>
+              <button style={s.refreshBtn} onClick={loadFunctionApps}><RefreshCw size={14} /> Refresh</button>
+            </div>
+            <div style={{ ...s.panel, overflowX: "auto" }}>
+              {fnLoading ? (
+                <div style={s.empty}>Loading function apps...</div>
+              ) : fnFiltered.length === 0 ? (
+                <div style={s.empty}>No function apps found.</div>
+              ) : (
+                <table style={s.table}>
+                  <thead>
+                    <tr>
+                      {["Function App", "Subscription", "Resource Group", "Runtime", "Location", "State", "Last Execution", "Last Status"].map(h => (
+                        <th key={h} style={s.th}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fnFiltered.map(app => {
+                      const lr = functionLastRuns[app.id];
+                      const sub = subscriptions.find(s => s.id === app.subscriptionId);
+                      return (
+                        <FnAppRow
+                          key={app.id}
+                          app={app}
+                          lr={lr}
+                          subName={sub?.name || app.subscriptionId.slice(0, 8) + "..."}
+                          fnLastRunsLoading={fnLastRunsLoading}
+                        />
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </>
+        );
+      })()}
 
       {(activeTab === "data-products" || activeTab === "ai-agents") && (
         <div style={{ ...s.panel, display: "flex", alignItems: "center", justifyContent: "center", padding: "80px 0", color: C.textMute, fontSize: 16, fontStyle: "italic" }}>
@@ -704,6 +806,50 @@ function CriticalityBadge({ value }) {
       display: "inline-block", fontSize: 11, fontWeight: 700, padding: "2px 8px",
       borderRadius: 999, letterSpacing: "0.04em", textTransform: "uppercase", ...st,
     }}>{value}</span>
+  );
+}
+
+function FnAppRow({ app, lr, subName, fnLastRunsLoading }) {
+  const navigate = useNavigate();
+  const [hovered, setHovered] = useState(false);
+  const lastRunTime = lr?.lastRunTime;
+  const lastRunStatus = lr?.lastRunStatus;
+  const appInsightsConfigured = lr?.appInsightsConfigured;
+  return (
+    <tr style={{ ...s.tr, background: hovered ? C.hover : "" }}
+      onClick={() => navigate(`/function-app/${app.subscriptionId}/${app.resourceGroup}/${app.name}`)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <td style={{ ...s.td, color: C.blue, fontWeight: 600, whiteSpace: "nowrap" }}>{app.name}</td>
+      <td style={{ ...s.td, fontSize: 13, whiteSpace: "nowrap" }}>{subName}</td>
+      <td style={{ ...s.td, fontSize: 13, whiteSpace: "nowrap" }}>{app.resourceGroup}</td>
+      <td style={{ ...s.td, fontSize: 12, color: C.textMute }}>
+        {app.runtimeStack ? app.runtimeStack.replace(/\|/g, " ").toLowerCase() : <span style={{ color: "#444" }}>—</span>}
+      </td>
+      <td style={{ ...s.td, fontSize: 12 }}>{app.location || "—"}</td>
+      <td style={s.td}><StatusBadge status={app.state} /></td>
+      <td style={{ ...s.td, fontSize: 12, color: C.textMute }}>
+        {fnLastRunsLoading && !lr
+          ? <span style={{ color: "#444" }}>...</span>
+          : !appInsightsConfigured
+            ? <span style={{ color: "#444" }} title="App Insights not configured">—</span>
+            : lastRunTime
+              ? <span title={format(new Date(lastRunTime), "PPpp")}>
+                  {formatDistanceToNow(new Date(lastRunTime), { addSuffix: true })}
+                </span>
+              : <span style={{ color: "#444" }}>No runs</span>}
+      </td>
+      <td style={s.td}>
+        {fnLastRunsLoading && !lr
+          ? <span style={{ color: "#444" }}>...</span>
+          : !appInsightsConfigured
+            ? <span style={{ color: "#444" }} title="App Insights not configured">—</span>
+            : lastRunStatus
+              ? <StatusBadge status={lastRunStatus} />
+              : <span style={{ color: "#444" }}>—</span>}
+      </td>
+    </tr>
   );
 }
 

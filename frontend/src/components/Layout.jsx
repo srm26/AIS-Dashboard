@@ -46,6 +46,10 @@ export default function Layout({ children }) {
     if (parts[5] === "run" && parts[6]) {
       crumbs.push({ label: `Run ${parts[6].slice(0, 8)}...`, to: null });
     }
+  } else if (parts[0] === "function-app" && parts.length >= 4) {
+    const [, subId, rg, appName] = parts;
+    crumbs.push({ label: "Function Apps", to: "/" });
+    crumbs.push({ label: appName, to: `/function-app/${subId}/${rg}/${appName}` });
   }
 
   const logout = () => { clearToken(); navigate("/login", { replace: true }); };
