@@ -50,6 +50,13 @@ export default function Layout({ children }) {
     const [, subId, rg, appName] = parts;
     crumbs.push({ label: "Function Apps", to: "/" });
     crumbs.push({ label: appName, to: `/function-app/${subId}/${rg}/${appName}` });
+    if (parts[4] === "fn" && parts[5]) {
+      const fnName = decodeURIComponent(parts[5]);
+      crumbs.push({ label: fnName, to: `/function-app/${subId}/${rg}/${appName}/fn/${parts[5]}` });
+      if (parts[6] === "run" && parts[7]) {
+        crumbs.push({ label: "Run detail", to: null });
+      }
+    }
   }
 
   const logout = () => { clearToken(); navigate("/login", { replace: true }); };

@@ -4,6 +4,8 @@ import Dashboard from "./components/Dashboard";
 import WorkflowDetail from "./components/WorkflowDetail";
 import RunDetail from "./components/RunDetail";
 import FunctionAppDetail from "./components/FunctionAppDetail";
+import FunctionDetail from "./components/FunctionDetail";
+import FunctionRunDetail from "./components/FunctionRunDetail";
 import Layout from "./components/Layout";
 import Login from "./components/Login";
 import { getUser, handleSSORedirect } from "./auth";
@@ -25,6 +27,8 @@ export default function App() {
               <Route path="/workflow/:subId/:rg/:site/:name" element={<WorkflowDetail />} />
               <Route path="/workflow/:subId/:rg/:site/:name/run/:runName" element={<RunDetail />} />
               <Route path="/function-app/:subId/:rg/:appName" element={<FunctionAppDetail />} />
+              <Route path="/function-app/:subId/:rg/:appName/fn/:fnName" element={<FunctionDetail />} />
+              <Route path="/function-app/:subId/:rg/:appName/fn/:fnName/run/:operationId" element={<FunctionRunDetail />} />
             </Routes>
           </Layout>
         </ProtectedRoute>

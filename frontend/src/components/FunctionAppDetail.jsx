@@ -1,9 +1,8 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { RefreshCw } from "lucide-react";
 import { api } from "../api/client";
-import StatusBadge from "./StatusBadge";
-import { format, formatDistanceToNow } from "date-fns";
+import { formatDistanceToNow } from "date-fns";
 
 const C = {
   surface: "#063c59", hover: "#0a4a6e", border: "#0e5278",
@@ -15,7 +14,6 @@ const s = {
   header: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 24 },
   title: { fontSize: 22, fontWeight: 700, color: C.textPri, marginBottom: 4 },
   meta: { fontSize: 13, color: C.textMute },
-  btnRow: { display: "flex", gap: 8 },
   btn: {
     padding: "8px 16px", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600,
     display: "flex", alignItems: "center", gap: 6, border: `1px solid ${C.border}`,
@@ -23,39 +21,48 @@ const s = {
   },
   panel: { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden" },
   table: { width: "100%", borderCollapse: "collapse" },
-  th: { textAlign: "left", padding: "10px 16px", fontSize: 11, color: C.textMute, borderBottom: `1px solid ${C.border}`, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 },
-  tr: { borderBottom: `1px solid ${C.border}` },
+  th: {
+    textAlign: "left", padding: "10px 16px", fontSize: 11, color: C.textMute,
+    borderBottom: `1px solid ${C.border}`, textTransform: "uppercase",
+    letterSpacing: "0.06em", fontWeight: 600,
+  },
+  tr: { borderBottom: `1px solid ${C.border}`, cursor: "pointer" },
   td: { padding: "13px 16px", fontSize: 14, color: C.textSec },
   empty: { textAlign: "center", padding: 56, color: C.textMute },
-  err: { background: "#3a1a0a", color: C.orange, borderRadius: 6, padding: "10px 16px", marginBottom: 16, fontSize: 13, border: `1px solid ${C.orange}44` },
-  filterBar: { display: "flex", gap: 10, marginBottom: 16, alignItems: "center" },
-  label: { fontSize: 12, color: C.textMute },
-  select: {
-    background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6,
-    color: C.textPri, padding: "7px 12px", fontSize: 13, outline: "none", cursor: "pointer",
+  err: {
+    background: "#3a1a0a", color: C.orange, borderRadius: 6,
+    padding: "10px 16px", marginBottom: 16, fontSize: 13, border: `1px solid ${C.orange}44`,
   },
+  note: { fontSize: 12, color: C.textMute, marginTop: 8 },
 };
+
+function rateColor(rate) {
+  if (rate == null) return C.textMute;
+  if (rate >= 95) return C.green;
+  if (rate >= 80) return C.gold;
+  return C.orange;
+}
 
 export default function FunctionAppDetail() {
   const { subId, rg, appName } = useParams();
-  const [executions, setExecutions] = useState([]);
+  const navigate = useNavigate();
+  const [functions, setFunctions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [days, setDays] = useState(7);
-  const [pendingDays, setPendingDays] = useState(7);
 
-  const loadExecutions = useCallback(async (d) => {
+  const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const data = await api.getFunctionAppExecutions(subId, rg, appName, d);
-      setExecutions(data.executions || []);
+      const data = await api.getFunctionsInApp(subId, rg, appName);
+      setFunctions(data.functions || []);
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
   }, [subId, rg, appName]);
 
-  useEffect(() => { loadExecutions(days); }, [loadExecutions]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [load]);
 
-  const applyFilter = () => { setDays(pendingDays); loadExecutions(pendingDays); };
+  const openFn = (fnName) =>
+    navigate(`/function-app/${subId}/${rg}/${appName}/fn/${encodeURIComponent(fnName)}`);
 
   return (
     <div>
@@ -64,26 +71,8 @@ export default function FunctionAppDetail() {
           <div style={s.title}>{appName}</div>
           <div style={s.meta}>{rg} &nbsp;·&nbsp; {subId.slice(0, 8)}…</div>
         </div>
-        <div style={s.btnRow}>
-          <button style={s.btn} onClick={() => loadExecutions(days)}>
-            <RefreshCw size={14} /> Refresh
-          </button>
-        </div>
-      </div>
-
-      <div style={s.filterBar}>
-        <span style={s.label}>Show last</span>
-        <select style={s.select} value={pendingDays} onChange={e => setPendingDays(Number(e.target.value))}>
-          <option value={1}>1 day</option>
-          <option value={7}>7 days</option>
-          <option value={14}>14 days</option>
-          <option value={30}>30 days</option>
-        </select>
-        <button
-          onClick={applyFilter}
-          style={{ ...s.btn, background: C.blue, color: "#0c2536", border: "none" }}
-        >
-          Apply
+        <button style={s.btn} onClick={load}>
+          <RefreshCw size={14} /> Refresh
         </button>
       </div>
 
@@ -91,49 +80,52 @@ export default function FunctionAppDetail() {
 
       <div style={{ ...s.panel, overflowX: "auto" }}>
         {loading ? (
-          <div style={s.empty}>Loading executions...</div>
-        ) : executions.length === 0 ? (
-          <div style={s.empty}>No executions found in the selected time range.</div>
+          <div style={s.empty}>Loading functions…</div>
+        ) : functions.length === 0 ? (
+          <div style={s.empty}>No functions found in the last 30 days.</div>
         ) : (
           <table style={s.table}>
             <thead>
               <tr>
-                {["Function", "Status", "Started", "Duration (ms)", "Result Code"].map(h => (
+                {["Function", "Last Run", "Total Runs (30d)", "Success Rate"].map(h => (
                   <th key={h} style={s.th}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {executions.map((ex, i) => (
-                <ExecRow key={i} ex={ex} />
+              {functions.map((fn, i) => (
+                <FnRow key={i} fn={fn} onClick={() => openFn(fn.fnName)} />
               ))}
             </tbody>
           </table>
         )}
       </div>
+      {!loading && functions.length > 0 && (
+        <div style={s.note}>Stats based on last 30 days of Application Insights data.</div>
+      )}
     </div>
   );
 }
 
-function ExecRow({ ex }) {
+function FnRow({ fn, onClick }) {
   const [hovered, setHovered] = useState(false);
-  const status = ex.success ? "Succeeded" : "Failed";
-  const ts = ex.timestamp ? new Date(ex.timestamp) : null;
-  const durationMs = typeof ex.duration === "number" ? Math.round(ex.duration) : null;
+  const ts = fn.lastRun ? new Date(fn.lastRun) : null;
+  const rate = fn.successRate;
   return (
-    <tr style={{ ...s.tr, background: hovered ? C.hover : "" }}
+    <tr
+      style={{ ...s.tr, background: hovered ? C.hover : "" }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onClick={onClick}
     >
-      <td style={{ ...s.td, color: C.blue, fontWeight: 500 }}>{ex.name || "—"}</td>
-      <td style={s.td}><StatusBadge status={status} /></td>
-      <td style={{ ...s.td, fontSize: 12 }}>
-        {ts
-          ? <span title={format(ts, "PPpp")}>{formatDistanceToNow(ts, { addSuffix: true })}</span>
-          : "—"}
+      <td style={{ ...s.td, color: C.blue, fontWeight: 600 }}>{fn.fnName || "—"}</td>
+      <td style={{ ...s.td, fontSize: 13 }}>
+        {ts ? <span title={ts.toISOString()}>{formatDistanceToNow(ts, { addSuffix: true })}</span> : "—"}
       </td>
-      <td style={{ ...s.td, fontSize: 13 }}>{durationMs !== null ? durationMs.toLocaleString() : "—"}</td>
-      <td style={{ ...s.td, fontSize: 13, color: C.textMute }}>{ex.resultCode || "—"}</td>
+      <td style={{ ...s.td, fontSize: 13 }}>{fn.totalRuns?.toLocaleString() ?? "—"}</td>
+      <td style={{ ...s.td, fontSize: 13, fontWeight: 600, color: rateColor(rate) }}>
+        {rate != null ? `${rate}%` : "—"}
+      </td>
     </tr>
   );
 }

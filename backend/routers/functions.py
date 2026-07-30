@@ -430,6 +430,123 @@ async def debug_ai_config(
     return out
 
 
+@router.get("/{subscription_id}/{resource_group}/{app_name}/functions")
+async def list_functions_in_app(
+    subscription_id: str,
+    resource_group: str,
+    app_name: str = Path(..., pattern=r"^[a-zA-Z0-9_-]{1,60}$"),
+    _: dict = Depends(get_current_user),
+):
+    """List individual functions within a Function App with 30-day stats."""
+    app_id = await _get_ai_app_id(subscription_id, resource_group, app_name)
+    if not app_id:
+        raise HTTPException(status_code=404, detail=f"Application Insights not configured for '{app_name}'.")
+    kql = (
+        "requests"
+        f" | where cloud_RoleName =~ '{app_name}'"
+        " | where timestamp > ago(30d)"
+        " | extend fnName = tostring(customDimensions['FunctionName'])"
+        " | where isnotempty(fnName)"
+        " | summarize lastRun=max(timestamp), totalRuns=count(),"
+        "   successCount=countif(success==true) by fnName"
+        " | extend successRate=round(todouble(successCount)/todouble(totalRuns)*100, 1)"
+        " | order by lastRun desc"
+    )
+    try:
+        rows = await get_ai_client().query(app_id, kql)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"functions": rows}
+
+
+@router.get("/{subscription_id}/{resource_group}/{app_name}/run/{operation_id}")
+async def get_run_detail(
+    subscription_id: str,
+    resource_group: str,
+    app_name: str = Path(..., pattern=r"^[a-zA-Z0-9_-]{1,60}$"),
+    operation_id: str = Path(...),
+    _: dict = Depends(get_current_user),
+):
+    """Return traces, exceptions, and dependencies for a single function invocation."""
+    import re as _re
+    if not _re.match(r'^[a-zA-Z0-9|._\-]{1,300}$', operation_id):
+        raise HTTPException(status_code=400, detail="Invalid operation ID format.")
+    app_id = await _get_ai_app_id(subscription_id, resource_group, app_name)
+    if not app_id:
+        raise HTTPException(status_code=404, detail=f"Application Insights not configured for '{app_name}'.")
+
+    oid = operation_id.replace("'", "")  # belt-and-suspenders sanitise
+    client = get_ai_client()
+    req_kql = (
+        f"requests | where operation_Id == '{oid}' | take 1"
+        " | project timestamp, name, success, duration, resultCode, url, client_IP,"
+        "   customDimensions, operation_Id"
+    )
+    traces_kql = (
+        f"traces | where operation_Id == '{oid}' | order by timestamp asc"
+        " | project timestamp, message, severityLevel, customDimensions"
+    )
+    exc_kql = (
+        f"exceptions | where operation_Id == '{oid}'"
+        " | project timestamp, type, outerMessage, innermostMessage, details"
+    )
+    deps_kql = (
+        f"dependencies | where operation_Id == '{oid}' | order by timestamp asc"
+        " | project timestamp, name, target, type, success, duration, resultCode, data"
+    )
+    results = await asyncio.gather(
+        client.query(app_id, req_kql),
+        client.query(app_id, traces_kql),
+        client.query(app_id, exc_kql),
+        client.query(app_id, deps_kql),
+        return_exceptions=True,
+    )
+
+    def safe(r):
+        return r if isinstance(r, list) else []
+
+    req_rows, trace_rows, exc_rows, dep_rows = results
+    return {
+        "request": safe(req_rows)[0] if safe(req_rows) else None,
+        "traces": safe(trace_rows),
+        "exceptions": safe(exc_rows),
+        "dependencies": safe(dep_rows),
+    }
+
+
+@router.get("/{subscription_id}/{resource_group}/{app_name}/{fn_name}/runs")
+async def list_fn_runs(
+    subscription_id: str,
+    resource_group: str,
+    app_name: str = Path(..., pattern=r"^[a-zA-Z0-9_-]{1,60}$"),
+    fn_name: str = Path(..., pattern=r"^[a-zA-Z0-9_-]{1,80}$"),
+    days: int = Query(7, ge=1, le=30),
+    top: int = Query(100, ge=1, le=500),
+    _: dict = Depends(get_current_user),
+):
+    """List runs for a specific function within a Function App."""
+    app_id = await _get_ai_app_id(subscription_id, resource_group, app_name)
+    if not app_id:
+        raise HTTPException(status_code=404, detail=f"Application Insights not configured for '{app_name}'.")
+    kql = (
+        "requests"
+        f" | where cloud_RoleName =~ '{app_name}'"
+        f" | where tostring(customDimensions['FunctionName']) =~ '{fn_name}'"
+        f" | where timestamp > ago({days}d)"
+        " | order by timestamp desc"
+        f" | take {top}"
+        " | project timestamp, success, duration, resultCode, operation_Id, name,"
+        "   triggerType=tostring(customDimensions['TriggerType']),"
+        "   invocationId=tostring(customDimensions['InvocationId']),"
+        "   url, client_IP"
+    )
+    try:
+        rows = await get_ai_client().query(app_id, kql)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"runs": rows}
+
+
 @router.get("/{subscription_id}/{resource_group}/{app_name}/executions")
 async def list_executions(
     subscription_id: str,
