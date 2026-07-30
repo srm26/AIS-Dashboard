@@ -21,6 +21,16 @@ async function req(path, options = {}) {
   return res.status === 204 ? null : res.json();
 }
 
+async function reqFormData(path, formData) {
+  const token = getToken();
+  const headers = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${BASE}${path}`, { method: "POST", headers, body: formData });
+  if (res.status === 401) { clearToken(); window.location.href = "/login"; throw new Error("Session expired"); }
+  if (!res.ok) { const text = await res.text(); throw new Error(text || `HTTP ${res.status}`); }
+  return res.json();
+}
+
 export const api = {
   getSubscriptions: () => req("/workflows/subscriptions"),
   getWorkflows: () => req("/workflows"),
@@ -32,8 +42,12 @@ export const api = {
     const qs = p.toString();
     return req(`/workflows/summary${qs ? `?${qs}` : ""}`);
   },
-  getRuns: (subId, rg, site, name, top = 50) =>
-    req(`/workflows/${subId}/${rg}/${site}/${name}/runs?top=${top}`),
+  getRuns: (subId, rg, site, name, startTime, endTime) => {
+    const p = new URLSearchParams({ top: "250" });
+    if (startTime) p.set("start_time", startTime);
+    if (endTime) p.set("end_time", endTime);
+    return req(`/workflows/${subId}/${rg}/${site}/${name}/runs?${p}`);
+  },
   getActions: (subId, rg, site, name, runName) =>
     req(`/workflows/${subId}/${rg}/${site}/${name}/runs/${runName}/actions`),
   getPayload: (subId, rg, site, name, runName, actionName) =>
@@ -46,4 +60,11 @@ export const api = {
     req(`/workflows/${subId}/${rg}/${site}/${name}/enable`, { method: "POST" }),
   run: (subId, rg, site, name) =>
     req(`/workflows/${subId}/${rg}/${site}/${name}/run`, { method: "POST" }),
+  getMetadata: () => req("/metadata"),
+  updateWorkflowMetadata: (data) => req("/metadata", { method: "PUT", body: JSON.stringify(data) }),
+  importMetadataCSV: (file) => { const fd = new FormData(); fd.append("file", file); return reqFormData("/metadata/import", fd); },
+  getViews: () => req("/views"),
+  createView: (data) => req("/views", { method: "POST", body: JSON.stringify(data) }),
+  setDefaultView: (id) => req(`/views/${id}/default`, { method: "PATCH" }),
+  deleteView: (id) => req(`/views/${id}`, { method: "DELETE" }),
 };
