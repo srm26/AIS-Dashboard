@@ -36,17 +36,52 @@ def _parse_connection_string(conn_str: str) -> dict:
     return result
 
 
-async def _find_app_id(sub_id: str, site_resource_id: str, instrumentation_key: str = "") -> Optional[str]:
-    """Find App Insights AppId by IK match or hidden-link tag across all configured subscriptions.
+async def _read_app_settings(sub_id: str, site_path: str) -> dict:
+    """Read app settings, retrying newer API versions first to handle subscription-specific 400s."""
+    for version in ("2022-09-01", "2022-03-01", "2021-02-01"):
+        try:
+            data = await get_client(sub_id).post(
+                f"{site_path}/config/appsettings/list",
+                api_version=version,
+            )
+            return data.get("properties") or {}
+        except Exception as e:
+            if "400" not in str(e):
+                return {}  # non-400 errors won't be fixed by a different version
+    return {}
 
-    Searches the Function App's own subscription first, then others, to handle cases where
-    the App Insights resource lives in a different subscription. Also matches by hidden-link
-    tag for portal-connected App Insights that don't add app settings.
+
+async def _find_app_id(sub_id: str, site_resource_id: str, instrumentation_key: str = "") -> Optional[str]:
+    """Find App Insights AppId by IK match or hidden-link tag.
+
+    Tries Resource Graph first (single cross-subscription call, works with basic Reader role),
+    then falls back to direct per-subscription ARM enumeration.
     """
     site_id_lower = site_resource_id.lower()
     ik = instrumentation_key.strip() if instrumentation_key else ""
-    subs = [sub_id] + [s for s in settings.subscription_ids if s != sub_id]
 
+    # Resource Graph: one call covers all subscriptions, uses a different permission path
+    # that works even when direct microsoft.insights/components ARM calls return 400.
+    try:
+        rows = await get_client(sub_id).resource_graph(
+            "Resources"
+            " | where type == 'microsoft.insights/components'"
+            " | project appId=tostring(properties.AppId),"
+            "   ik=tostring(properties.InstrumentationKey), tags",
+            subscriptions=settings.subscription_ids,
+        )
+        for row in rows:
+            if ik and row.get("ik", "").strip() == ik:
+                return row.get("appId") or None
+            tags = row.get("tags") or {}
+            for tag_key in tags:
+                if site_id_lower in tag_key.lower():
+                    return row.get("appId") or None
+    except Exception:
+        pass
+
+    # Fallback: direct ARM per-subscription paginate
+    subs = [sub_id] + [s for s in settings.subscription_ids if s != sub_id]
     for search_sub in subs:
         try:
             components = await get_client(search_sub).paginate(
@@ -86,27 +121,16 @@ async def _get_ai_app_id(sub_id: str, rg: str, app_name: str) -> Optional[str]:
     )
     app_id = None
     ik = ""
-    try:
-        data = await get_client(sub_id).post(
-            f"{site_resource_id}/config/appsettings/list",
-            api_version=WEB_API_VERSION,
-        )
-        props = data.get("properties") or {}
-
-        # Prefer modern connection string (may contain ApplicationId directly)
-        conn_str = props.get("APPLICATIONINSIGHTS_CONNECTION_STRING", "")
-        if conn_str:
-            parsed = _parse_connection_string(conn_str)
-            if parsed.get("ApplicationId"):
-                app_id = parsed["ApplicationId"]
-            elif parsed.get("InstrumentationKey"):
-                ik = parsed["InstrumentationKey"]
-
-        # Fall back to legacy instrumentation key app setting
-        if not app_id and not ik:
-            ik = props.get("APPINSIGHTS_INSTRUMENTATIONKEY", "")
-    except Exception:
-        pass
+    props = await _read_app_settings(sub_id, site_resource_id)
+    conn_str = props.get("APPLICATIONINSIGHTS_CONNECTION_STRING", "")
+    if conn_str:
+        parsed = _parse_connection_string(conn_str)
+        if parsed.get("ApplicationId"):
+            app_id = parsed["ApplicationId"]
+        elif parsed.get("InstrumentationKey"):
+            ik = parsed["InstrumentationKey"]
+    if not app_id and not ik:
+        ik = props.get("APPINSIGHTS_INSTRUMENTATIONKEY", "")
 
     # Look up by IK or by hidden-link tag (portal-connected App Insights)
     if not app_id:
@@ -297,50 +321,82 @@ async def debug_ai_config(
         f"/subscriptions/{subscription_id}/resourceGroups/{resource_group}"
         f"/providers/Microsoft.Web/sites/{app_name}"
     )
+    site_id_lower = site_resource_id.lower()
     out: dict = {
         "site_resource_id": site_resource_id,
+        "app_settings_api_version_used": None,
         "app_settings_readable": False,
         "app_settings_error": None,
         "ai_settings_found": {},
         "ik": None,
-        "subscriptions_searched": [],
+        "resource_graph_total": None,
+        "resource_graph_error": None,
+        "resource_graph_ik_match": None,
+        "resource_graph_hidden_link_match": None,
+        "arm_subscriptions_searched": [],
         "ik_match": None,
         "hidden_link_match": None,
     }
     ik = ""
+
+    # Try app settings with multiple API versions
+    for version in ("2022-09-01", "2022-03-01", "2021-02-01"):
+        try:
+            data = await get_client(subscription_id).post(
+                f"{site_resource_id}/config/appsettings/list",
+                api_version=version,
+            )
+            props = data.get("properties") or {}
+            out["app_settings_readable"] = True
+            out["app_settings_api_version_used"] = version
+            ai_keys = {k: v for k, v in props.items()
+                       if any(kw in k.lower() for kw in ("insight", "instrumentation"))}
+            out["ai_settings_found"] = ai_keys
+            conn_str = props.get("APPLICATIONINSIGHTS_CONNECTION_STRING", "")
+            if conn_str:
+                parsed = _parse_connection_string(conn_str)
+                ik = parsed.get("InstrumentationKey", "").strip()
+                if parsed.get("ApplicationId"):
+                    out["conn_str_app_id"] = parsed["ApplicationId"]
+            if not ik:
+                ik = props.get("APPINSIGHTS_INSTRUMENTATIONKEY", "").strip()
+            out["ik"] = ik[:8] + "..." if ik else None
+            break
+        except Exception as e:
+            out["app_settings_error"] = f"{version}: {e}"
+            if "400" not in str(e):
+                break
+
+    # Resource Graph discovery
     try:
-        data = await get_client(subscription_id).post(
-            f"{site_resource_id}/config/appsettings/list",
-            api_version=WEB_API_VERSION,
+        rows = await get_client(subscription_id).resource_graph(
+            "Resources"
+            " | where type == 'microsoft.insights/components'"
+            " | project appId=tostring(properties.AppId),"
+            "   ik=tostring(properties.InstrumentationKey), tags, name",
+            subscriptions=settings.subscription_ids,
         )
-        props = data.get("properties") or {}
-        out["app_settings_readable"] = True
-        ai_keys = {k: v for k, v in props.items()
-                   if any(kw in k.lower() for kw in ("insight", "instrumentation"))}
-        out["ai_settings_found"] = ai_keys
-
-        conn_str = props.get("APPLICATIONINSIGHTS_CONNECTION_STRING", "")
-        if conn_str:
-            parsed = _parse_connection_string(conn_str)
-            ik = parsed.get("InstrumentationKey", "").strip()
-            if parsed.get("ApplicationId"):
-                out["conn_str_app_id"] = parsed["ApplicationId"]
-        if not ik:
-            ik = props.get("APPINSIGHTS_INSTRUMENTATIONKEY", "").strip()
-        out["ik"] = ik[:8] + "..." if ik else None
+        out["resource_graph_total"] = len(rows)
+        for row in rows:
+            if ik and row.get("ik", "").strip() == ik:
+                out["resource_graph_ik_match"] = {"name": row.get("name"), "appId": row.get("appId")}
+            tags = row.get("tags") or {}
+            for tag_key in tags:
+                if site_id_lower in tag_key.lower():
+                    out["resource_graph_hidden_link_match"] = {"name": row.get("name"), "appId": row.get("appId"), "tag": tag_key}
     except Exception as e:
-        out["app_settings_error"] = str(e)
+        out["resource_graph_error"] = str(e)
 
-    site_id_lower = site_resource_id.lower()
+    # ARM per-subscription fallback
     subs = [subscription_id] + [s for s in settings.subscription_ids if s != subscription_id]
     for search_sub in subs:
-        out["subscriptions_searched"].append(search_sub)
+        out["arm_subscriptions_searched"].append(search_sub)
         try:
             components = await get_client(search_sub).paginate(
                 f"/subscriptions/{search_sub}/providers/microsoft.insights/components",
                 api_version="2020-02-02",
             )
-            out[f"components_in_{search_sub[:8]}"] = len(components)
+            out[f"arm_components_in_{search_sub[:8]}"] = len(components)
             for comp in components:
                 props = comp.get("properties") or {}
                 comp_ik = props.get("InstrumentationKey", "").strip()
@@ -351,7 +407,7 @@ async def debug_ai_config(
                     if site_id_lower in tag_key.lower():
                         out["hidden_link_match"] = {"name": comp.get("name"), "app_id": props.get("AppId"), "tag": tag_key}
         except Exception as e:
-            out[f"components_error_{search_sub[:8]}"] = str(e)
+            out[f"arm_error_{search_sub[:8]}"] = str(e)
 
     return out
 

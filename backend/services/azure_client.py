@@ -90,6 +90,30 @@ class AzureClient:
         )
         return resp.json() if resp.content else {}
 
+    async def resource_graph(self, query: str, subscriptions: List[str]) -> List[Dict]:
+        """Cross-subscription Resource Graph query, normalises columns/rows to dicts."""
+        all_rows: List[Dict] = []
+        skip_token: Optional[str] = None
+        while True:
+            body: Dict = {"subscriptions": subscriptions, "query": query}
+            if skip_token:
+                body["options"] = {"$skipToken": skip_token}
+            resp = await self._request(
+                "POST",
+                f"{MGMT_BASE}/providers/Microsoft.ResourceGraph/resources",
+                headers=await self._headers(),
+                params={"api-version": "2021-03-01"},
+                json=body,
+            )
+            payload = resp.json().get("data", {})
+            col_names = [c["name"] for c in payload.get("columns", [])]
+            for row in payload.get("rows", []):
+                all_rows.append(dict(zip(col_names, row)))
+            skip_token = resp.json().get("$skipToken")
+            if not skip_token or not payload.get("rows"):
+                break
+        return all_rows
+
     async def paginate(self, path: str, params: Optional[Dict] = None, api_version: str = WEB_API_VERSION) -> List[Any]:
         results = []
         data = await self.get(path, params, api_version=api_version)
