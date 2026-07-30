@@ -67,13 +67,22 @@ async def _get_ai_app_id(sub_id: str, rg: str, app_name: str) -> Optional[str]:
             f"/providers/Microsoft.Web/sites/{app_name}/config/appsettings/list",
             api_version=WEB_API_VERSION,
         )
-        conn_str = (data.get("properties") or {}).get("APPLICATIONINSIGHTS_CONNECTION_STRING", "")
+        props = data.get("properties") or {}
+
+        # Prefer the modern connection string (contains ApplicationId directly)
+        conn_str = props.get("APPLICATIONINSIGHTS_CONNECTION_STRING", "")
         if conn_str:
             parsed = _parse_connection_string(conn_str)
             if parsed.get("ApplicationId"):
                 app_id = parsed["ApplicationId"]
             elif parsed.get("InstrumentationKey"):
                 app_id = await _find_app_id_by_ik(sub_id, parsed["InstrumentationKey"])
+
+        # Fall back to the legacy instrumentation key setting
+        if not app_id:
+            ik = props.get("APPINSIGHTS_INSTRUMENTATIONKEY", "")
+            if ik:
+                app_id = await _find_app_id_by_ik(sub_id, ik)
     except Exception:
         pass
 
