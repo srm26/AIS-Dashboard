@@ -210,7 +210,27 @@ async def _find_app_id_by_sampling(sub_id: str, rg: str, app_name: str) -> Optio
     return None
 
 
-async def _list_function_apps_for_sub(sub_id: str) -> List[dict]:
+async def _get_logic_app_site_ids() -> set:
+    """Return a set of ARM site resource IDs (lowercase) that host Logic Apps Standard workflows.
+
+    Some older or non-standard Logic Apps Standard deployments don't include 'workflowapp'
+    in their kind string, so kind-based filtering alone misses them. A Resource Graph query
+    for child workflow resources is the reliable secondary check.
+    """
+    try:
+        rows = await get_client(settings.subscription_ids[0]).resource_graph(
+            "Resources"
+            " | where type == 'microsoft.web/sites/workflows'"
+            " | extend siteId = tolower(tostring(split(id, '/workflows/')[0]))"
+            " | distinct siteId",
+            subscriptions=settings.subscription_ids,
+        )
+        return {r.get("siteId", "") for r in rows if r.get("siteId")}
+    except Exception:
+        return set()
+
+
+async def _list_function_apps_for_sub(sub_id: str, logic_app_site_ids: set) -> List[dict]:
     client = get_client(sub_id)
     rg_filter = settings.resource_group_filter
     if rg_filter:
@@ -225,6 +245,7 @@ async def _list_function_apps_for_sub(sub_id: str) -> List[dict]:
         s for s in sites
         if "functionapp" in (s.get("kind") or "").lower()
         and "workflowapp" not in (s.get("kind") or "").lower()
+        and s.get("id", "").lower() not in logic_app_site_ids
     ]
 
 
@@ -242,16 +263,20 @@ async def _get_all_function_apps(force: bool = False) -> List[dict]:
         except Exception:
             sub_names[sub_id] = sub_id
 
+    # Fetch Logic Apps site IDs and subscription display names in parallel,
+    # then fetch function app lists (needs la_ids for filtering).
+    logic_app_site_ids, _ = await asyncio.gather(
+        _get_logic_app_site_ids(),
+        asyncio.gather(*[_fetch_sub_name(s) for s in settings.subscription_ids]),
+    )
+
     async def _fetch(sub_id: str):
         try:
-            return sub_id, await _list_function_apps_for_sub(sub_id)
+            return sub_id, await _list_function_apps_for_sub(sub_id, logic_app_site_ids)
         except Exception:
             return sub_id, []
 
-    sub_results, _ = await asyncio.gather(
-        asyncio.gather(*[_fetch(s) for s in settings.subscription_ids]),
-        asyncio.gather(*[_fetch_sub_name(s) for s in settings.subscription_ids]),
-    )
+    sub_results = await asyncio.gather(*[_fetch(s) for s in settings.subscription_ids])
 
     apps = []
     for sub_id, site_list in sub_results:
