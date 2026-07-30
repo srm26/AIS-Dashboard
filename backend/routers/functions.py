@@ -117,41 +117,36 @@ async def _get_ai_app_id(sub_id: str, rg: str, app_name: str) -> Optional[str]:
 
 
 async def _find_app_id_by_sampling(sub_id: str, rg: str, app_name: str) -> Optional[str]:
-    """Probe App Insights components in the same RG with a test query.
-
-    Used when app settings are unreadable and there is no hidden-link tag.
-    Queries each component to see which one has telemetry for this function app.
+    """Probe App Insights components with a test query to find which one has telemetry
+    for this function app. Searches subscription-wide (not just same RG) across all
+    configured subscriptions. Used when app settings are unreadable and no hidden-link tag.
     """
-    try:
-        subs = [sub_id] + [s for s in settings.subscription_ids if s != sub_id]
-        kql = (
-            "requests"
-            " | where timestamp > ago(30d)"
-            f" | where cloud_RoleName =~ '{app_name}'"
-            " | take 1"
-            " | project timestamp"
-        )
-        for search_sub in subs:
+    kql = (
+        "requests"
+        " | where timestamp > ago(30d)"
+        f" | where cloud_RoleName =~ '{app_name}'"
+        " | take 1"
+        " | project timestamp"
+    )
+    subs = [sub_id] + [s for s in settings.subscription_ids if s != sub_id]
+    for search_sub in subs:
+        try:
+            components = await get_client(search_sub).paginate(
+                f"/subscriptions/{search_sub}/providers/microsoft.insights/components",
+                api_version="2020-02-02",
+            )
+        except Exception:
+            continue
+        for comp in components:
+            comp_app_id = (comp.get("properties") or {}).get("AppId")
+            if not comp_app_id:
+                continue
             try:
-                components = await get_client(search_sub).paginate(
-                    f"/subscriptions/{search_sub}/resourceGroups/{rg}"
-                    f"/providers/microsoft.insights/components",
-                    api_version="2020-02-02",
-                )
+                rows = await get_ai_client().query(comp_app_id, kql)
+                if rows:
+                    return comp_app_id
             except Exception:
                 continue
-            for comp in components:
-                comp_app_id = (comp.get("properties") or {}).get("AppId")
-                if not comp_app_id:
-                    continue
-                try:
-                    rows = await get_ai_client().query(comp_app_id, kql)
-                    if rows:
-                        return comp_app_id
-                except Exception:
-                    continue
-    except Exception:
-        pass
     return None
 
 
@@ -289,9 +284,9 @@ async def debug_ai_config(
     subscription_id: str,
     resource_group: str,
     app_name: str = Path(..., pattern=r"^[a-zA-Z0-9_-]{1,60}$"),
-    _: dict = Depends(require_admin),
+    _: dict = Depends(get_current_user),
 ):
-    """Admin-only: diagnose App Insights detection for a Function App (bypasses cache)."""
+    """Diagnose App Insights detection for a Function App (bypasses cache)."""
     site_resource_id = (
         f"/subscriptions/{subscription_id}/resourceGroups/{resource_group}"
         f"/providers/Microsoft.Web/sites/{app_name}"
