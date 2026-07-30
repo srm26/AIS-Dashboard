@@ -4,7 +4,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
-from auth import get_current_user
+from auth import get_current_user, require_admin
 from config import settings
 from services.azure_client import get_client, WEB_API_VERSION
 from services.app_insights_client import get_ai_client
@@ -37,28 +37,32 @@ def _parse_connection_string(conn_str: str) -> dict:
 
 
 async def _find_app_id(sub_id: str, site_resource_id: str, instrumentation_key: str = "") -> Optional[str]:
-    """Find App Insights AppId by IK match or hidden-link tag on App Insights components.
+    """Find App Insights AppId by IK match or hidden-link tag across all configured subscriptions.
 
-    When App Insights is connected via the Azure portal (not via app settings), Azure stamps a
-    'hidden-link:' tag on the App Insights component pointing at the Function App resource ID.
-    This covers that case as a final fallback.
+    Searches the Function App's own subscription first, then others, to handle cases where
+    the App Insights resource lives in a different subscription. Also matches by hidden-link
+    tag for portal-connected App Insights that don't add app settings.
     """
-    try:
-        components = await get_client(sub_id).paginate(
-            f"/subscriptions/{sub_id}/providers/microsoft.insights/components",
-            api_version="2020-02-02",
-        )
-        site_id_lower = site_resource_id.lower()
-        for comp in components:
-            props = comp.get("properties") or {}
-            if instrumentation_key and props.get("InstrumentationKey") == instrumentation_key:
-                return props.get("AppId")
-            tags = comp.get("tags") or {}
-            for tag_key in tags:
-                if site_id_lower in tag_key.lower():
+    site_id_lower = site_resource_id.lower()
+    ik = instrumentation_key.strip() if instrumentation_key else ""
+    subs = [sub_id] + [s for s in settings.subscription_ids if s != sub_id]
+
+    for search_sub in subs:
+        try:
+            components = await get_client(search_sub).paginate(
+                f"/subscriptions/{search_sub}/providers/microsoft.insights/components",
+                api_version="2020-02-02",
+            )
+            for comp in components:
+                props = comp.get("properties") or {}
+                if ik and props.get("InstrumentationKey", "").strip() == ik:
                     return props.get("AppId")
-    except Exception:
-        pass
+                tags = comp.get("tags") or {}
+                for tag_key in tags:
+                    if site_id_lower in tag_key.lower():
+                        return props.get("AppId")
+        except Exception:
+            continue
     return None
 
 
@@ -233,6 +237,77 @@ async def get_last_runs(_: dict = Depends(get_current_user)):
         )
         for app, r in zip(apps, results)
     }
+
+
+@router.get("/{subscription_id}/{resource_group}/{app_name}/ai-debug")
+async def debug_ai_config(
+    subscription_id: str,
+    resource_group: str,
+    app_name: str = Path(..., pattern=r"^[a-zA-Z0-9_-]{1,60}$"),
+    _: dict = Depends(require_admin),
+):
+    """Admin-only: diagnose App Insights detection for a Function App (bypasses cache)."""
+    site_resource_id = (
+        f"/subscriptions/{subscription_id}/resourceGroups/{resource_group}"
+        f"/providers/Microsoft.Web/sites/{app_name}"
+    )
+    out: dict = {
+        "site_resource_id": site_resource_id,
+        "app_settings_readable": False,
+        "app_settings_error": None,
+        "ai_settings_found": {},
+        "ik": None,
+        "subscriptions_searched": [],
+        "ik_match": None,
+        "hidden_link_match": None,
+    }
+    ik = ""
+    try:
+        data = await get_client(subscription_id).post(
+            f"{site_resource_id}/config/appsettings/list",
+            api_version=WEB_API_VERSION,
+        )
+        props = data.get("properties") or {}
+        out["app_settings_readable"] = True
+        ai_keys = {k: v for k, v in props.items()
+                   if any(kw in k.lower() for kw in ("insight", "instrumentation"))}
+        out["ai_settings_found"] = ai_keys
+
+        conn_str = props.get("APPLICATIONINSIGHTS_CONNECTION_STRING", "")
+        if conn_str:
+            parsed = _parse_connection_string(conn_str)
+            ik = parsed.get("InstrumentationKey", "").strip()
+            if parsed.get("ApplicationId"):
+                out["conn_str_app_id"] = parsed["ApplicationId"]
+        if not ik:
+            ik = props.get("APPINSIGHTS_INSTRUMENTATIONKEY", "").strip()
+        out["ik"] = ik[:8] + "..." if ik else None
+    except Exception as e:
+        out["app_settings_error"] = str(e)
+
+    site_id_lower = site_resource_id.lower()
+    subs = [subscription_id] + [s for s in settings.subscription_ids if s != subscription_id]
+    for search_sub in subs:
+        out["subscriptions_searched"].append(search_sub)
+        try:
+            components = await get_client(search_sub).paginate(
+                f"/subscriptions/{search_sub}/providers/microsoft.insights/components",
+                api_version="2020-02-02",
+            )
+            out[f"components_in_{search_sub[:8]}"] = len(components)
+            for comp in components:
+                props = comp.get("properties") or {}
+                comp_ik = props.get("InstrumentationKey", "").strip()
+                if ik and comp_ik == ik:
+                    out["ik_match"] = {"name": comp.get("name"), "app_id": props.get("AppId"), "sub": search_sub[:8]}
+                tags = comp.get("tags") or {}
+                for tag_key in tags:
+                    if site_id_lower in tag_key.lower():
+                        out["hidden_link_match"] = {"name": comp.get("name"), "app_id": props.get("AppId"), "tag": tag_key}
+        except Exception as e:
+            out[f"components_error_{search_sub[:8]}"] = str(e)
+
+    return out
 
 
 @router.get("/{subscription_id}/{resource_group}/{app_name}/executions")
