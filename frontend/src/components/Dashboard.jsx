@@ -270,6 +270,7 @@ export default function Dashboard() {
   const [fnError, setFnError] = useState(null);
   const [fnLoaded, setFnLoaded] = useState(false);
   const [fnSearch, setFnSearch] = useState("");
+  const [fnSelectedSub, setFnSelectedSub] = useState([]);
 
   const loadFunctionApps = useCallback(async () => {
     setFnLoading(true); setFnLastRunsLoading(true); setFnError(null);
@@ -443,8 +444,8 @@ export default function Dashboard() {
       )}
 
       {activeTab === "function-apps" && (() => {
-        const fnFiltered = (selectedSub.length
-          ? functionApps.filter(a => selectedSub.includes(a.subscriptionId))
+        const fnFiltered = (fnSelectedSub.length
+          ? functionApps.filter(a => fnSelectedSub.includes(a.subscriptionId))
           : functionApps
         ).filter(a => {
           if (!fnSearch) return true;
@@ -468,8 +469,8 @@ export default function Dashboard() {
             <div style={s.toolbar}>
               <MultiSelectDropdown
                 options={subscriptions.map(s => ({ id: s.id, label: s.name }))}
-                selected={selectedSub}
-                onChange={handleSubChange}
+                selected={fnSelectedSub}
+                onChange={setFnSelectedSub}
                 placeholder="All Subscriptions"
               />
               <div style={s.searchWrap}>
