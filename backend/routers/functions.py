@@ -297,7 +297,9 @@ async def _get_fn_last_run(app: dict, sem: asyncio.Semaphore) -> dict:
             f" | where cloud_RoleName =~ '{role_name}'"
             " | order by timestamp desc"
             " | take 1"
-            " | project timestamp, name, success, resultCode"
+            " | project timestamp, name, success, resultCode,"
+            "   functionName=coalesce(tostring(customDimensions['faas.name']),"
+            "     tostring(customDimensions['FunctionName']), name)"
         )
         try:
             rows = await get_ai_client().query(app_id, kql)
@@ -479,13 +481,15 @@ async def list_functions_in_app(
     if not app_id:
         raise HTTPException(status_code=404, detail=f"Application Insights not configured for '{app_name}'.")
     role_name = _get_ai_role_name(app_name)
-    # FunctionName in customDimensions is not always populated (depends on Functions host version).
-    # Fall back to the `name` field which is always set.
+    # Function name extraction: newer Functions hosts (OTLP/OpenTelemetry) use
+    # customDimensions["faas.name"]; older hosts use "FunctionName"/"functionName";
+    # operation_Name (= name field) is always set as a final fallback.
     kql = (
         "requests"
         " | where timestamp > ago(30d)"
         f" | where cloud_RoleName =~ '{role_name}'"
         " | extend fnName = case("
+        "   isnotempty(tostring(customDimensions['faas.name'])), tostring(customDimensions['faas.name']),"
         "   isnotempty(tostring(customDimensions['FunctionName'])), tostring(customDimensions['FunctionName']),"
         "   isnotempty(tostring(customDimensions['functionName'])), tostring(customDimensions['functionName']),"
         "   name)"
@@ -576,15 +580,16 @@ async def list_fn_runs(
         "requests"
         f" | where cloud_RoleName =~ '{role_name}'"
         f" | where timestamp > ago({days}d)"
-        # Match against FunctionName (any capitalisation) or the name field
-        f" | where tostring(customDimensions['FunctionName']) =~ '{fn_name}'"
+        # Match against faas.name (OTLP), FunctionName (classic), or operation_Name
+        f" | where tostring(customDimensions['faas.name']) =~ '{fn_name}'"
+        f"   or tostring(customDimensions['FunctionName']) =~ '{fn_name}'"
         f"   or tostring(customDimensions['functionName']) =~ '{fn_name}'"
         f"   or name =~ '{fn_name}'"
         " | order by timestamp desc"
         f" | take {top}"
         " | project timestamp, success, duration, resultCode, operation_Id, name,"
         "   triggerType=tostring(customDimensions['TriggerType']),"
-        "   invocationId=tostring(customDimensions['InvocationId']),"
+        "   invocationId=coalesce(tostring(customDimensions['InvocationId']), tostring(customDimensions['faas.invocation_id'])),"
         "   url, client_IP"
     )
     try:
