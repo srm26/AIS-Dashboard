@@ -36,17 +36,27 @@ def _parse_connection_string(conn_str: str) -> dict:
     return result
 
 
-async def _find_app_id_by_ik(sub_id: str, instrumentation_key: str) -> Optional[str]:
-    """Find the App Insights AppId by matching InstrumentationKey across all AI components."""
+async def _find_app_id(sub_id: str, site_resource_id: str, instrumentation_key: str = "") -> Optional[str]:
+    """Find App Insights AppId by IK match or hidden-link tag on App Insights components.
+
+    When App Insights is connected via the Azure portal (not via app settings), Azure stamps a
+    'hidden-link:' tag on the App Insights component pointing at the Function App resource ID.
+    This covers that case as a final fallback.
+    """
     try:
         components = await get_client(sub_id).paginate(
             f"/subscriptions/{sub_id}/providers/microsoft.insights/components",
             api_version="2020-02-02",
         )
+        site_id_lower = site_resource_id.lower()
         for comp in components:
             props = comp.get("properties") or {}
-            if props.get("InstrumentationKey") == instrumentation_key:
+            if instrumentation_key and props.get("InstrumentationKey") == instrumentation_key:
                 return props.get("AppId")
+            tags = comp.get("tags") or {}
+            for tag_key in tags:
+                if site_id_lower in tag_key.lower():
+                    return props.get("AppId")
     except Exception:
         pass
     return None
@@ -60,31 +70,37 @@ async def _get_ai_app_id(sub_id: str, rg: str, app_name: str) -> Optional[str]:
     if entry and now - entry["ts"] < _AI_CONFIG_TTL:
         return entry["app_id"]
 
+    site_resource_id = (
+        f"/subscriptions/{sub_id}/resourceGroups/{rg}"
+        f"/providers/Microsoft.Web/sites/{app_name}"
+    )
     app_id = None
+    ik = ""
     try:
         data = await get_client(sub_id).post(
-            f"/subscriptions/{sub_id}/resourceGroups/{rg}"
-            f"/providers/Microsoft.Web/sites/{app_name}/config/appsettings/list",
+            f"{site_resource_id}/config/appsettings/list",
             api_version=WEB_API_VERSION,
         )
         props = data.get("properties") or {}
 
-        # Prefer the modern connection string (contains ApplicationId directly)
+        # Prefer modern connection string (may contain ApplicationId directly)
         conn_str = props.get("APPLICATIONINSIGHTS_CONNECTION_STRING", "")
         if conn_str:
             parsed = _parse_connection_string(conn_str)
             if parsed.get("ApplicationId"):
                 app_id = parsed["ApplicationId"]
             elif parsed.get("InstrumentationKey"):
-                app_id = await _find_app_id_by_ik(sub_id, parsed["InstrumentationKey"])
+                ik = parsed["InstrumentationKey"]
 
-        # Fall back to the legacy instrumentation key setting
-        if not app_id:
+        # Fall back to legacy instrumentation key app setting
+        if not app_id and not ik:
             ik = props.get("APPINSIGHTS_INSTRUMENTATIONKEY", "")
-            if ik:
-                app_id = await _find_app_id_by_ik(sub_id, ik)
     except Exception:
         pass
+
+    # Look up by IK or by hidden-link tag (portal-connected App Insights)
+    if not app_id:
+        app_id = await _find_app_id(sub_id, site_resource_id, ik)
 
     _ai_config_cache[cache_key] = {"app_id": app_id, "ts": now}
     return app_id
