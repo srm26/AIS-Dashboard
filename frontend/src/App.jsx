@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import Dashboard from "./components/Dashboard";
 import WorkflowDetail from "./components/WorkflowDetail";
 import RunDetail from "./components/RunDetail";
+import FunctionAppDetail from "./components/FunctionAppDetail";
 import Layout from "./components/Layout";
 import Login from "./components/Login";
 import { getUser, handleSSORedirect } from "./auth";
@@ -23,6 +24,7 @@ export default function App() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/workflow/:subId/:rg/:site/:name" element={<WorkflowDetail />} />
               <Route path="/workflow/:subId/:rg/:site/:name/run/:runName" element={<RunDetail />} />
+              <Route path="/function-app/:subId/:rg/:appName" element={<FunctionAppDetail />} />
             </Routes>
           </Layout>
         </ProtectedRoute>

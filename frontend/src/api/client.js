@@ -67,4 +67,8 @@ export const api = {
   createView: (data) => req("/views", { method: "POST", body: JSON.stringify(data) }),
   setDefaultView: (id) => req(`/views/${id}/default`, { method: "PATCH" }),
   deleteView: (id) => req(`/views/${id}`, { method: "DELETE" }),
+  getFunctionApps: () => req("/functions"),
+  getFunctionAppLastRuns: () => req("/functions/last-runs"),
+  getFunctionAppExecutions: (subId, rg, appName, days = 7, top = 100) =>
+    req(`/functions/${subId}/${rg}/${appName}/executions?days=${days}&top=${top}`),
 };
