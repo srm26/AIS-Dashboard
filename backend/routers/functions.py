@@ -441,11 +441,17 @@ async def list_functions_in_app(
     app_id = await _get_ai_app_id(subscription_id, resource_group, app_name)
     if not app_id:
         raise HTTPException(status_code=404, detail=f"Application Insights not configured for '{app_name}'.")
+    # FunctionName in customDimensions is not always populated (depends on Functions host version).
+    # Fall back to the `name` field which is always set. Also skip the cloud_RoleName filter
+    # on the first try — cloud_RoleName may differ from the ARM resource name in some configs.
     kql = (
         "requests"
-        f" | where cloud_RoleName =~ '{app_name}'"
         " | where timestamp > ago(30d)"
-        " | extend fnName = tostring(customDimensions['FunctionName'])"
+        f" | where cloud_RoleName =~ '{app_name}'"
+        " | extend fnName = case("
+        "   isnotempty(tostring(customDimensions['FunctionName'])), tostring(customDimensions['FunctionName']),"
+        "   isnotempty(tostring(customDimensions['functionName'])), tostring(customDimensions['functionName']),"
+        "   name)"
         " | where isnotempty(fnName)"
         " | summarize lastRun=max(timestamp), totalRuns=count(),"
         "   successCount=countif(success==true) by fnName"
@@ -456,6 +462,28 @@ async def list_functions_in_app(
         rows = await get_ai_client().query(app_id, kql)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+    # If nothing came back, cloud_RoleName might not match the ARM resource name.
+    # Retry without the filter so we can at least show something.
+    if not rows:
+        kql_no_role = (
+            "requests"
+            " | where timestamp > ago(30d)"
+            " | extend fnName = case("
+            "   isnotempty(tostring(customDimensions['FunctionName'])), tostring(customDimensions['FunctionName']),"
+            "   isnotempty(tostring(customDimensions['functionName'])), tostring(customDimensions['functionName']),"
+            "   name)"
+            " | where isnotempty(fnName)"
+            " | summarize lastRun=max(timestamp), totalRuns=count(),"
+            "   successCount=countif(success==true) by fnName"
+            " | extend successRate=round(todouble(successCount)/todouble(totalRuns)*100, 1)"
+            " | order by lastRun desc"
+        )
+        try:
+            rows = await get_ai_client().query(app_id, kql_no_role)
+        except Exception:
+            pass
+
     return {"functions": rows}
 
 
@@ -531,8 +559,11 @@ async def list_fn_runs(
     kql = (
         "requests"
         f" | where cloud_RoleName =~ '{app_name}'"
-        f" | where tostring(customDimensions['FunctionName']) =~ '{fn_name}'"
         f" | where timestamp > ago({days}d)"
+        # Match against FunctionName (any capitalisation) or the name field
+        f" | where tostring(customDimensions['FunctionName']) =~ '{fn_name}'"
+        f"   or tostring(customDimensions['functionName']) =~ '{fn_name}'"
+        f"   or name =~ '{fn_name}'"
         " | order by timestamp desc"
         f" | take {top}"
         " | project timestamp, success, duration, resultCode, operation_Id, name,"
