@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     # where automatic detection fails (e.g. SP lacks config/appsettings/list).
     # Example: {"fa-wus2-filemover-dv-01":"abc123-...", "fa-other":"def456-..."}
     azure_function_ai_overrides: str = "{}"
+    # Optional: JSON map of function app name → cloud_RoleName as it appears in App Insights.
+    # Use when the App Insights cloud_RoleName differs from the ARM resource name.
+    # Example: {"fa-wus2-filemover-dv-01":"la-wus2-filemover-dv-generic-01"}
+    azure_function_role_overrides: str = "{}"
     # Optional: client ID of a user-assigned managed identity.
     # Leave unset to use the system-assigned managed identity.
     azure_managed_identity_client_id: str = ""
@@ -29,6 +33,13 @@ class Settings(BaseSettings):
     def function_ai_overrides(self) -> Dict[str, str]:
         try:
             return json.loads(self.azure_function_ai_overrides)
+        except Exception:
+            return {}
+
+    @property
+    def function_role_overrides(self) -> Dict[str, str]:
+        try:
+            return json.loads(self.azure_function_role_overrides)
         except Exception:
             return {}
 

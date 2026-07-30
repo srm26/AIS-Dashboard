@@ -101,6 +101,17 @@ async def _find_app_id(sub_id: str, site_resource_id: str, instrumentation_key: 
     return None
 
 
+def _get_ai_role_name(app_name: str) -> str:
+    """Return the cloud_RoleName to use in KQL for this app.
+
+    Falls back to the app's ARM resource name when no override is configured.
+    Set AZURE_FUNCTION_ROLE_OVERRIDES={"fa-app-01":"actual-role-name"} when the
+    function app emits telemetry under a different cloud_RoleName (e.g. a shared
+    App Insights instance where WEBSITE_CLOUD_ROLENAME was customised).
+    """
+    return settings.function_role_overrides.get(app_name, app_name)
+
+
 async def _get_ai_app_id(sub_id: str, rg: str, app_name: str) -> Optional[str]:
     """Return the Application Insights AppId for a Function App, cached for 1 hour."""
     cache_key = f"{sub_id}/{rg}/{app_name}"
@@ -151,10 +162,11 @@ async def _find_app_id_by_sampling(sub_id: str, rg: str, app_name: str) -> Optio
     for this function app. Uses Resource Graph first (works even when direct ARM
     calls return 400), then falls back to ARM per-subscription enumeration.
     """
+    role_name = _get_ai_role_name(app_name)
     kql = (
         "requests"
         " | where timestamp > ago(30d)"
-        f" | where cloud_RoleName =~ '{app_name}'"
+        f" | where cloud_RoleName =~ '{role_name}'"
         " | take 1"
         " | project timestamp"
     )
@@ -278,10 +290,11 @@ async def _get_fn_last_run(app: dict, sem: asyncio.Semaphore) -> dict:
         if not app_id:
             return {"lastRunTime": None, "lastRunStatus": None, "appInsightsConfigured": False}
 
+        role_name = _get_ai_role_name(app["name"])
         kql = (
             "requests"
             " | where timestamp > ago(7d)"
-            f" | where cloud_RoleName =~ '{app['name']}'"
+            f" | where cloud_RoleName =~ '{role_name}'"
             " | order by timestamp desc"
             " | take 1"
             " | project timestamp, name, success, resultCode"
@@ -427,6 +440,30 @@ async def debug_ai_config(
         except Exception as e:
             out[f"arm_error_{search_sub[:8]}"] = str(e)
 
+    # Discover distinct cloud_RoleNames in the resolved App Insights.
+    # This helps diagnose cases where the function app emits telemetry under a
+    # different name than its ARM resource name (e.g. shared App Insights with
+    # WEBSITE_CLOUD_ROLENAME configured, or a Logic Apps Standard host).
+    resolved_app_id = out.get("resource_graph_ik_match", {}).get("appId") \
+        or out.get("ik_match", {}).get("app_id") \
+        or (settings.function_ai_overrides.get(app_name))
+    out["resolved_app_id"] = resolved_app_id
+    out["role_name_override"] = settings.function_role_overrides.get(app_name)
+    if resolved_app_id:
+        try:
+            role_rows = await get_ai_client().query(
+                resolved_app_id,
+                "requests | where timestamp > ago(30d)"
+                " | summarize count() by cloud_RoleName"
+                " | order by count_ desc | take 20",
+            )
+            out["cloud_role_names_30d"] = [
+                {"roleName": r.get("cloud_RoleName"), "count": r.get("count_")}
+                for r in role_rows
+            ]
+        except Exception as e:
+            out["cloud_role_names_error"] = str(e)
+
     return out
 
 
@@ -441,13 +478,13 @@ async def list_functions_in_app(
     app_id = await _get_ai_app_id(subscription_id, resource_group, app_name)
     if not app_id:
         raise HTTPException(status_code=404, detail=f"Application Insights not configured for '{app_name}'.")
+    role_name = _get_ai_role_name(app_name)
     # FunctionName in customDimensions is not always populated (depends on Functions host version).
-    # Fall back to the `name` field which is always set. Also skip the cloud_RoleName filter
-    # on the first try — cloud_RoleName may differ from the ARM resource name in some configs.
+    # Fall back to the `name` field which is always set.
     kql = (
         "requests"
         " | where timestamp > ago(30d)"
-        f" | where cloud_RoleName =~ '{app_name}'"
+        f" | where cloud_RoleName =~ '{role_name}'"
         " | extend fnName = case("
         "   isnotempty(tostring(customDimensions['FunctionName'])), tostring(customDimensions['FunctionName']),"
         "   isnotempty(tostring(customDimensions['functionName'])), tostring(customDimensions['functionName']),"
@@ -534,9 +571,10 @@ async def list_fn_runs(
     app_id = await _get_ai_app_id(subscription_id, resource_group, app_name)
     if not app_id:
         raise HTTPException(status_code=404, detail=f"Application Insights not configured for '{app_name}'.")
+    role_name = _get_ai_role_name(app_name)
     kql = (
         "requests"
-        f" | where cloud_RoleName =~ '{app_name}'"
+        f" | where cloud_RoleName =~ '{role_name}'"
         f" | where timestamp > ago({days}d)"
         # Match against FunctionName (any capitalisation) or the name field
         f" | where tostring(customDimensions['FunctionName']) =~ '{fn_name}'"
@@ -574,10 +612,11 @@ async def list_executions(
                 "or APPLICATIONINSIGHTS_CONNECTION_STRING is missing from its app settings."
             ),
         )
+    role_name = _get_ai_role_name(app_name)
     kql = (
         "requests"
         f" | where timestamp > ago({days}d)"
-        f" | where cloud_RoleName =~ '{app_name}'"
+        f" | where cloud_RoleName =~ '{role_name}'"
         " | order by timestamp desc"
         f" | take {top}"
         " | project timestamp, name, success, duration, resultCode, cloud_RoleName"
