@@ -462,28 +462,6 @@ async def list_functions_in_app(
         rows = await get_ai_client().query(app_id, kql)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
-
-    # If nothing came back, cloud_RoleName might not match the ARM resource name.
-    # Retry without the filter so we can at least show something.
-    if not rows:
-        kql_no_role = (
-            "requests"
-            " | where timestamp > ago(30d)"
-            " | extend fnName = case("
-            "   isnotempty(tostring(customDimensions['FunctionName'])), tostring(customDimensions['FunctionName']),"
-            "   isnotempty(tostring(customDimensions['functionName'])), tostring(customDimensions['functionName']),"
-            "   name)"
-            " | where isnotempty(fnName)"
-            " | summarize lastRun=max(timestamp), totalRuns=count(),"
-            "   successCount=countif(success==true) by fnName"
-            " | extend successRate=round(todouble(successCount)/todouble(totalRuns)*100, 1)"
-            " | order by lastRun desc"
-        )
-        try:
-            rows = await get_ai_client().query(app_id, kql_no_role)
-        except Exception:
-            pass
-
     return {"functions": rows}
 
 
