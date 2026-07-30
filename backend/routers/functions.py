@@ -10,7 +10,7 @@ from services.azure_client import get_client, WEB_API_VERSION
 from services.app_insights_client import get_ai_client
 
 _CACHE_TTL = 120         # seconds — function app list cache
-_AI_CONFIG_TTL = 3600    # seconds — App Insights app_id cache per function app
+_AI_CONFIG_TTL = 300     # seconds — App Insights app_id cache per function app (5 min)
 
 _fn_cache: dict = {"data": None, "ts": 0.0}
 _ai_config_cache: dict = {}  # key: "{sub}/{rg}/{app}" → {"app_id": str|None, "ts": float}
@@ -106,8 +106,53 @@ async def _get_ai_app_id(sub_id: str, rg: str, app_name: str) -> Optional[str]:
     if not app_id:
         app_id = await _find_app_id(sub_id, site_resource_id, ik)
 
+    # Final fallback: probe App Insights components in the same resource group
+    # by running a lightweight test query — works even when the SP cannot read
+    # app settings and there is no hidden-link tag.
+    if not app_id:
+        app_id = await _find_app_id_by_sampling(sub_id, rg, app_name)
+
     _ai_config_cache[cache_key] = {"app_id": app_id, "ts": now}
     return app_id
+
+
+async def _find_app_id_by_sampling(sub_id: str, rg: str, app_name: str) -> Optional[str]:
+    """Probe App Insights components in the same RG with a test query.
+
+    Used when app settings are unreadable and there is no hidden-link tag.
+    Queries each component to see which one has telemetry for this function app.
+    """
+    try:
+        subs = [sub_id] + [s for s in settings.subscription_ids if s != sub_id]
+        kql = (
+            "requests"
+            " | where timestamp > ago(30d)"
+            f" | where cloud_RoleName =~ '{app_name}'"
+            " | take 1"
+            " | project timestamp"
+        )
+        for search_sub in subs:
+            try:
+                components = await get_client(search_sub).paginate(
+                    f"/subscriptions/{search_sub}/resourceGroups/{rg}"
+                    f"/providers/microsoft.insights/components",
+                    api_version="2020-02-02",
+                )
+            except Exception:
+                continue
+            for comp in components:
+                comp_app_id = (comp.get("properties") or {}).get("AppId")
+                if not comp_app_id:
+                    continue
+                try:
+                    rows = await get_ai_client().query(comp_app_id, kql)
+                    if rows:
+                        return comp_app_id
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return None
 
 
 async def _list_function_apps_for_sub(sub_id: str) -> List[dict]:
