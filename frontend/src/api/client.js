@@ -63,4 +63,8 @@ export const api = {
   getMetadata: () => req("/metadata"),
   updateWorkflowMetadata: (data) => req("/metadata", { method: "PUT", body: JSON.stringify(data) }),
   importMetadataCSV: (file) => { const fd = new FormData(); fd.append("file", file); return reqFormData("/metadata/import", fd); },
+  getViews: () => req("/views"),
+  createView: (data) => req("/views", { method: "POST", body: JSON.stringify(data) }),
+  setDefaultView: (id) => req(`/views/${id}/default`, { method: "PATCH" }),
+  deleteView: (id) => req(`/views/${id}`, { method: "DELETE" }),
 };

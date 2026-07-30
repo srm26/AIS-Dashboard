@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import os
 from config import settings
-from routers import workflows, auth, metadata
+from routers import workflows, auth, metadata, views
 
 app = FastAPI(title="Azure Logic Apps Dashboard", version="1.0.0")
 
@@ -22,6 +22,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(workflows.router)
 app.include_router(metadata.router)
+app.include_router(views.router)
 
 # Serve built React frontend in production
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
