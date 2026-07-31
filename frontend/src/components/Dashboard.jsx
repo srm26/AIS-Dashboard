@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { RefreshCw, Search, CheckCircle, XCircle, Activity, Play, Upload, Download, Bookmark, X } from "lucide-react";
 import { api } from "../api/client";
 import { isAdmin, getUser } from "../auth";
@@ -64,6 +64,7 @@ function getSavedFilters() {
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [workflows, setWorkflows] = useState(_wfCache);
   const [lastRuns, setLastRuns] = useState({});
   const [lastRunsLoading, setLastRunsLoading] = useState(true);
@@ -262,7 +263,10 @@ export default function Dashboard() {
     }
   };
 
-  const [activeTab, setActiveTab] = useState("integrations");
+  const [activeTab, setActiveTab] = useState(() => {
+    const p = new URLSearchParams(location.search).get("tab");
+    return p || "integrations";
+  });
   const [functionApps, setFunctionApps] = useState([]);
   const [functionLastRuns, setFunctionLastRuns] = useState({});
   const [fnLastRunsLoading, setFnLastRunsLoading] = useState(false);
@@ -285,6 +289,14 @@ export default function Dashboard() {
     } catch {}
     finally { setFnLastRunsLoading(false); }
   }, []);
+
+  // If landing directly on the function-apps tab (e.g. via breadcrumb ?tab=function-apps), load data.
+  useEffect(() => {
+    if (activeTab === "function-apps" && !fnLoaded) {
+      setFnLoaded(true);
+      loadFunctionApps();
+    }
+  }, []); // eslint-disable-line
 
   const handleTabChange = useCallback((key) => {
     setActiveTab(key);

@@ -48,7 +48,7 @@ export default function Layout({ children }) {
     }
   } else if (parts[0] === "function-app" && parts.length >= 4) {
     const [, subId, rg, appName] = parts;
-    crumbs.push({ label: "Function Apps", to: "/" });
+    crumbs.push({ label: "Function Apps", to: "/?tab=function-apps" });
     crumbs.push({ label: appName, to: `/function-app/${subId}/${rg}/${appName}` });
     if (parts[4] === "fn" && parts[5]) {
       const fnName = decodeURIComponent(parts[5]);
