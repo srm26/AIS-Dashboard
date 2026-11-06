@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import time
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
@@ -7,6 +8,8 @@ from services.azure_client import get_client, WEB_API_VERSION
 from services.metadata import load_metadata
 from config import settings
 from auth import get_current_user, require_admin
+
+logger = logging.getLogger(__name__)
 
 _CACHE_TTL = 120  # seconds
 _wf_cache: dict = {"data": None, "ts": 0.0}
@@ -152,6 +155,7 @@ async def list_subscriptions(_: dict = Depends(get_current_user)):
             data = await get_client(sub_id).get(f"/subscriptions/{sub_id}", api_version="2022-12-01")
             return {"id": sub_id, "name": data.get("displayName", sub_id)}
         except Exception as e:
+            logger.warning("Subscription lookup failed for %s: %s: %s", sub_id, type(e).__name__, e)
             msg = "⚠ Access denied" if "403" in str(e) else "⚠ Unavailable"
             return {"id": sub_id, "name": msg}
 
