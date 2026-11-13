@@ -13,6 +13,11 @@ backend/env.example
 backend/metadata.json
 backend/views.json
 
+# Local data exports / backups (contain names & emails) and publish profiles (credentials)
+prod-data-backup-*/
+workflow-metadata.csv
+*.PublishSettings
+
 # Node
 frontend/node_modules/
 
