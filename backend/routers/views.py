@@ -7,10 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from auth import get_current_user
+from config import settings
 
 router = APIRouter(prefix="/api/views", tags=["views"])
 
-VIEWS_FILE = os.path.join(os.path.dirname(__file__), "..", "views.json")
+VIEWS_FILE = os.path.join(settings.data_dir, "views.json")
 
 
 def _load():
@@ -21,6 +22,7 @@ def _load():
 
 
 def _save(views):
+    os.makedirs(settings.data_dir, exist_ok=True)
     with open(VIEWS_FILE, "w") as f:
         json.dump(views, f, indent=2)
 

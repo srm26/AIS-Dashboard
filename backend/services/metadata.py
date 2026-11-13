@@ -1,7 +1,9 @@
 import json
 import os
 
-_METADATA_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "metadata.json")
+from config import settings
+
+_METADATA_PATH = os.path.join(settings.data_dir, "metadata.json")
 
 
 def load_metadata() -> dict:
@@ -13,6 +15,7 @@ def load_metadata() -> dict:
 
 
 def save_metadata(store: dict):
+    os.makedirs(settings.data_dir, exist_ok=True)
     tmp = _METADATA_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(store, f, indent=2, ensure_ascii=False)

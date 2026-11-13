@@ -1,4 +1,5 @@
 import json
+import os
 from pydantic_settings import BaseSettings
 from typing import Dict, List
 
@@ -42,6 +43,14 @@ class Settings(BaseSettings):
             return json.loads(self.azure_function_role_overrides)
         except Exception:
             return {}
+
+    @property
+    def data_dir(self) -> str:
+        # Where metadata.json / views.json live. On App Service, /home/data is
+        # persistent storage that deployments never overwrite; locally, backend/.
+        if os.environ.get("WEBSITE_SITE_NAME"):
+            return "/home/data"
+        return os.path.dirname(os.path.abspath(__file__))
 
     @property
     def subscription_ids(self) -> List[str]:
