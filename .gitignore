@@ -9,6 +9,10 @@ backend/services/__pycache__/
 backend/.env
 backend/env.example
 
+# Runtime data — lives in /home/data on App Service, never deployed
+backend/metadata.json
+backend/views.json
+
 # Node
 frontend/node_modules/
 
