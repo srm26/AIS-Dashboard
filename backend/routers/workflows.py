@@ -45,7 +45,12 @@ async def _list_sites_for_sub(sub_id: str) -> List[dict]:
         sites = [s for items in results for s in items]
     else:
         sites = await client.paginate(f"/subscriptions/{sub_id}/providers/Microsoft.Web/sites")
-    return [s for s in sites if "workflowapp" in (s.get("kind") or "").lower()]
+    # Stopped Logic Apps are hidden from the dashboard entirely.
+    return [
+        s for s in sites
+        if "workflowapp" in (s.get("kind") or "").lower()
+        and (s.get("properties") or {}).get("state") != "Stopped"
+    ]
 
 
 async def _list_workflows_for_site(sub_id: str, rg: str, site_name: str) -> List[dict]:
